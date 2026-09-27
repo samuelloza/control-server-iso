@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contest Control</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg:#f4f5f7; --panel:#ffffff; --fg:#1c1e21; --muted:#6b7280;
+    --b:#d7dae0; --b-soft:#e9ebef;
+    --accent:#2563eb; --accent-fg:#fff;
+    --ok:#1e8449; --warn:#c9930a; --bad:#c0392b; --off:#9aa0a6;
+    --chip:#eef0f3;
+    --shadow:0 1px 2px rgba(0,0,0,.06), 0 1px 8px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#16181d; --panel:#1e2127; --fg:#e6e8eb; --muted:#9aa1ac;
+      --b:#333842; --b-soft:#2a2e36; --chip:#2a2e36;
+      --shadow:0 1px 2px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+
+  header {
+    position:sticky; top:0; z-index:20;
+    display:flex; flex-wrap:wrap; gap:.55rem; align-items:center;
+    padding:.6rem .9rem; background:var(--panel);
+    border-bottom:1px solid var(--b); box-shadow:var(--shadow);
+  }
+  header h1 { font-size:1rem; font-weight:700; margin:0 .4rem 0 0;
+              display:flex; align-items:center; gap:.4rem; }
+  header h1::before { content:"🖥"; font-size:1.1rem; }
+  header label { display:flex; align-items:center; gap:.3rem; color:var(--muted); font-size:.85rem; }
+  #status { margin-left:auto; color:var(--muted); font-size:.82rem; }
+  #report, #credentials { color:var(--accent); text-decoration:none; font-weight:600; font-size:.85rem; }
+  #report:hover, #credentials:hover { text-decoration:underline; }
+
+  input, select, button { font:inherit; }
+  input, select {
+    padding:.35rem .55rem; border:1px solid var(--b); border-radius:7px;
+    background:var(--panel); color:var(--fg);
+  }
+  input:focus, select:focus { outline:2px solid var(--accent); outline-offset:0; border-color:var(--accent); }
+  button {
+    cursor:pointer; padding:.35rem .7rem; border:1px solid var(--b);
+    border-radius:7px; background:var(--panel); color:var(--fg);
+    transition:background .12s, border-color .12s, transform .04s;
+  }
+  button:hover { border-color:var(--accent); background:var(--b-soft); }
+  button:active { transform:translateY(1px); }
+  #save, #allowsave {
+    background:var(--accent); color:var(--accent-fg); border-color:var(--accent); font-weight:600;
+  }
+  #save:hover, #allowsave:hover { filter:brightness(1.08); background:var(--accent); }
+
+  main { padding:1rem; max-width:1400px; margin:0 auto; }
+  .section { background:var(--panel); border:1px solid var(--b); border-radius:12px;
+             padding:.75rem .9rem; margin-bottom:.9rem; box-shadow:var(--shadow); }
+  .section > .lbl { font-size:.72rem; font-weight:700; letter-spacing:.06em;
+                    text-transform:uppercase; color:var(--muted); margin-bottom:.5rem; }
+  .bar { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; margin:0; }
+  .bar + .bar { margin-top:.5rem; }
+
+  #alertbar {
+    display:none; margin:0 1rem; padding:.55rem .9rem; border-radius:10px;
+    background:color-mix(in srgb, var(--bad) 14%, var(--panel));
+    border:1px solid color-mix(in srgb, var(--bad) 40%, var(--b));
+    color:var(--fg); box-shadow:var(--shadow);
+  }
+  #alertbar.on { display:block; }
+  #alertbar button { margin-left:.4rem; padding:.15rem .5rem; }
+
+  .machine-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr));
+                  gap:.6rem; margin:.2rem 0 .9rem; }
+  details.ipbox { grid-column:1/-1; margin:0; padding:.4rem .6rem .6rem; border-radius:12px;
+                  box-shadow:none; background:color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+  details.ipbox > summary { font-size:.82rem; }
+  details.ipbox.mix { border-color:var(--warn); }
+  details.ipbox.mix > summary { color:var(--warn); }
+  details.ipbox > .machine-grid { margin:.5rem 0 0; }
+  .machine-grid:empty::after { content:"ninguna"; color:var(--muted); }
+  .card {
+    position:relative; background:var(--panel); border:1px solid var(--b);
+    border-left:4px solid var(--off); border-radius:10px; padding:.55rem .7rem;
+    cursor:pointer; box-shadow:var(--shadow); transition:transform .08s, box-shadow .12s;
+  }
+  .card:hover { transform:translateY(-2px); box-shadow:0 4px 14px rgba(0,0,0,.12); }
+  .card.ok{border-left-color:var(--ok)} .card.warn{border-left-color:var(--warn)}
+  .card.bad{border-left-color:var(--bad)} .card.off{border-left-color:var(--off); opacity:.55}
+  .card.sel { outline:2px solid var(--accent); outline-offset:1px; }
+  .card.dup { border-left-color:var(--bad); border-left-width:6px; }
+  .card .id { font-weight:700; font-size:.92rem; }
+  .card .meta { font-size:.75rem; color:var(--muted); margin-top:.1rem; }
+  .chips { margin-top:.35rem; display:flex; flex-wrap:wrap; gap:.25rem; }
+  .chip { font-size:.72rem; padding:.05rem .4rem; border-radius:999px;
+          background:var(--chip); color:var(--fg); white-space:nowrap; }
+
+  #log { margin-top:.9rem; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+         white-space:pre-wrap; background:var(--panel); border:1px solid var(--b);
+         border-radius:10px; padding:.6rem .7rem; max-height:30vh; overflow:auto; box-shadow:var(--shadow); }
+
+  dialog {
+    max-width:min(92vw,780px); width:100%; padding:1.1rem 1.2rem;
+    border:1px solid var(--b); border-radius:14px; background:var(--panel); color:var(--fg);
+    box-shadow:0 10px 40px rgba(0,0,0,.3);
+  }
+  dialog::backdrop { background:rgba(0,0,0,.45); backdrop-filter:blur(2px); }
+  dialog h3 { margin:0 0 .7rem; font-size:1.05rem; }
+  dialog h4 { margin:1rem 0 .35rem; font-size:.8rem; text-transform:uppercase;
+              letter-spacing:.05em; color:var(--muted); }
+  dialog pre { white-space:pre-wrap; font:12px/1.5 ui-monospace,monospace;
+               background:var(--bg); border:1px solid var(--b); border-radius:8px;
+               padding:.5rem; max-height:40vh; overflow:auto; }
+  #shot { border-radius:8px; margin-top:.5rem; }
+
+  .muted { color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-size:.78rem; }
+  td,th { border:1px solid var(--b); padding:.3rem .45rem; text-align:left; }
+  th { background:var(--b-soft); font-weight:600; }
+
+  details { background:var(--panel); border:1px solid var(--b); border-radius:12px;
+            padding:.6rem .9rem; margin-bottom:.9rem; box-shadow:var(--shadow); }
+  details[open] { padding-bottom:.9rem; }
+  summary { cursor:pointer; font-weight:600; }
+  textarea { width:100%; font:12px/1.5 ui-monospace,monospace; padding:.5rem;
+             border:1px solid var(--b); border-radius:8px; background:var(--bg); color:var(--fg); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Contest Control</h1>
+  <input id="token" type="password" placeholder="admin / token de sede" size="22" autocomplete="off">
+  <button id="save">Guardar</button>
+  <label>grupo: <select id="group"><option value="">(todos)</option></select></label>
+  <label>filtro:
+    <select id="filter">
+      <option value="">todas</option>
+      <option value="usb">con USB</option>
+      <option value="locked">bloqueadas</option>
+      <option value="alert">con alerta</option>
+      <option value="unbound">sin equipo</option>
+      <option value="offline">offline</option>
+    </select>
+  </label>
+  <label><input id="byip" type="checkbox" checked> agrupar por IP</label>
+  <input id="qteam" type="search" placeholder="filtrar por equipo…" size="18" autocomplete="off">
+  <span id="status" class="muted"></span>
+  <a id="report" href="#" target="_blank">reporte</a>
+  <a id="credentials" href="#" target="_blank">📇 credenciales</a>
+</header>
+
+<div id="alertbar"></div>
+
+<main>
+  <div class="section">
+    <div class="lbl">Acciones · a las máquinas marcadas o al grupo entero</div>
+    <div class="bar actions">
+      <button data-a="lock">Bloquear</button>
+      <button data-a="unlock">Desbloquear</button>
+      <button data-a="logout">Cerrar sesión</button>
+      <button data-a="message">Mensaje…</button>
+      <button data-a="donottouch">No tocar</button>
+      <button data-a="cantouch">Reactivar</button>
+      <button data-a="set-allowlist">Allowlist…</button>
+      <button data-a="net-lock">Red: bloquear</button>
+      <button data-a="net-open">Red: abrir</button>
+      <button data-a="set-wallpaper">Wallpaper…</button>
+      <button data-a="screenshot">Captura</button>
+      <button data-a="usb-block">USB off</button>
+      <button data-a="usb-unblock">USB on</button>
+      <button data-a="collect-home">Recoger código</button>
+      <button data-a="reset-home">Limpiar home</button>
+      <button data-a="reboot">Reiniciar</button>
+      <button data-a="poweroff">Apagar</button>
+    </div>
+    <div class="bar">
+      <a id="dlhomes" href="#" target="_blank">descargar código del grupo (zip)</a>
+      <span class="muted">recoge el home de cada equipo · el .tar.gz queda nombrado con el id del equipo</span>
+    </div>
+    <div class="bar">
+      <button id="selall">marcar todas (filtro)</button>
+      <button id="selnone">desmarcar</button>
+      <span class="muted">shift-clic o clic derecho marca una máquina</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="lbl">Cupos por sede · equipos conectados / esperados</div>
+    <div id="quota" class="muted">—</div>
+  </div>
+
+  <div class="section">
+    <div class="lbl">Máquinas activas (<span id="activecount">0</span>)</div>
+    <div id="activegrid" class="machine-grid"></div>
+    <div class="lbl">Máquinas apagadas o desconectadas (<span id="offlinecount">0</span>)</div>
+    <div id="offlinegrid" class="machine-grid"></div>
+    <div id="log" class="muted">—</div>
+  </div>
+
+  <details id="allowbox">
+    <summary>Allowlist de red del grupo (persistente)</summary>
+    <p class="muted">Un dominio o IP por línea. Se guarda en el servidor y se
+      re-aplica a cada máquina al reconectar o reiniciar (a diferencia del botón
+      "Allowlist…", que es un envío puntual). Incluí <code>login.codi.com.bo</code>
+      y <code>stats.codi.com.bo</code> o las máquinas pierden el login.</p>
+    <textarea id="allowlist" rows="8" style="width:100%"
+      placeholder="login.codi.com.bo&#10;stats.codi.com.bo&#10;cppreference.com&#10;en.cppreference.com"></textarea>
+    <div class="bar">
+      <button id="allowsave">Guardar y aplicar al grupo</button>
+      <span id="allowmeta" class="muted"></span>
+    </div>
+  </details>
+
+  <details id="homepagebox">
+    <summary>Página de inicio de Firefox</summary>
+    <p class="muted">Con “(todos)” configura la página predeterminada global.
+      Se entrega en el próximo login; no manda comandos a las máquinas. Si es
+      externa, agregá su dominio a la allowlist.</p>
+    <div class="bar">
+      <input id="homepage" type="url" style="flex:1"
+        placeholder="https://contest.example/inicio">
+      <button id="homepagesave">Guardar</button>
+      <span id="homepagemeta" class="muted"></span>
+    </div>
+  </details>
+
+  <details id="logobox">
+    <summary>Logo SVG del fondo</summary>
+    <p class="muted">Con “(todos)” configura el logo global. Al elegir una sede,
+      su URL reemplaza al global; dejala vacía para volver a heredarlo. El nombre
+      del equipo seguirá debajo del logo. Agregá el host a la allowlist.</p>
+    <div class="bar">
+      <input id="logourl" type="url" style="flex:1" placeholder="https://contest.example/logo.svg">
+      <button id="logosave">Guardar</button>
+      <span id="logometa" class="muted"></span>
+    </div>
+  </details>
+</main>
+
+<dialog id="detail"></dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const tok = $("#token");
+
+// Token por URL: ?token=… (o #token=…). Se guarda y se limpia del address bar
+// para no dejarlo a la vista; el enlace con ?token= se puede marcar como favorito.
+(() => {
+  const q = new URLSearchParams(location.search).get("token")
+         || new URLSearchParams(location.hash.slice(1)).get("token");
+  if (q) {
+    sessionStorage.setItem("cc_token", q.trim());
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+  }
+})();
+tok.value = sessionStorage.getItem("cc_token") || "";
+$("#save").onclick = () => { sessionStorage.setItem("cc_token", tok.value.trim()); boot(); };
+const H = () => ({ "Authorization": "Bearer " + tok.value.trim() });
+const setStatus = m => $("#status").textContent = m;
+
+let machines = [], selected = new Set(), scope = null, es = null;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { ...H(), ...(opts.headers || {}) } });
+  if (r.status === 401) { setStatus("token inválido"); throw new Error("401"); }
+  if (r.status === 503) { setStatus("servidor sin admin token"); throw new Error("503"); }
+  return r;
+}
+
+function health(m) {
+  if (m.seconds_since_seen == null || m.seconds_since_seen > 120) return "off";
+  if (m.open_alerts) return "bad";
+  if ((m.mem != null && m.mem > 92) || (m.hd != null && m.hd > 95)) return "warn";
+  return "ok";
+}
+function visible(m) {
+  const g = $("#group").value, f = $("#filter").value;
+  const q = $("#qteam").value.trim().toLowerCase();
+  if (g && m.group_id !== g) return false;
+  if (q && !((m.binding && m.binding.name || "") + " " + (m.binding && m.binding.region || "")
+             + " " + (m.location || "") + " " + m.machine_id).toLowerCase().includes(q)) return false;
+  if (f === "usb" && !(m.usb === "blocked" || m.usb === "allowed") ) return m.open_alerts && false;
+  if (f === "usb") return m.usb === "allowed";
+  if (f === "locked") return !!m.lock_state;
+  if (f === "alert") return !!m.open_alerts;
+  if (f === "unbound") return !m.binding;
+  if (f === "offline") return health(m) === "off";
+  return true;
+}
+
+const collapsedIps = new Set();   // cajas plegadas: sobreviven al re-render de cada refresh
+function render() {
+  const groups = [...new Set(machines.map(m => m.group_id))].sort();
+  const gsel = $("#group"), cur = gsel.value;
+  gsel.innerHTML = '<option value="">(todos)</option>' + groups.map(g => `<option>${g}</option>`).join("");
+  gsel.value = cur;
+  if (scope) { gsel.value = scope; gsel.disabled = true; }
+
+  const activeGrid = $("#activegrid"), offlineGrid = $("#offlinegrid");
+  activeGrid.innerHTML = offlineGrid.innerHTML = "";
+  // Cuántas máquinas visibles están ligadas a cada user_id: >1 = mismo
+  // usuario logueado en más de una máquina a la vez (posible duplicado).
+  const userCount = new Map();
+  for (const m of machines) if (m.binding) userCount.set(m.binding.user_id, (userCount.get(m.binding.user_id) || 0) + 1);
+  // Orden: primero la sede, después el nombre del equipo; las sin equipo al final.
+  const key = m => [
+    (m.binding && m.binding.region || "￿"),
+    (m.binding && m.binding.name || "￿"),
+    m.machine_id,
+  ].join(" ").toLowerCase();
+  // La IP publica es la de la sede fisica (las PCs estan detras de NAT): agrupar por
+  // IP muestra cuantas PCs activas hay en cada sede y de que regiones vienen.
+  const byip = $("#byip").checked;
+  const ipOf = m => m.ip || "sin IP";
+  const list = machines.filter(visible).sort((a, b) => {
+    const ka = (byip ? ipOf(a) + " " : "") + key(a), kb = (byip ? ipOf(b) + " " : "") + key(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  const ipStats = new Map();   // "on|off ip" -> {n, regions: Map}
+  for (const m of list) {
+    const k = (health(m) === "off" ? "off " : "on ") + ipOf(m);
+    const st = ipStats.get(k) || ipStats.set(k, { n: 0, regions: new Map() }).get(k);
+    st.n++;
+    const r = m.binding && m.binding.region;
+    if (r) st.regions.set(r, (st.regions.get(r) || 0) + 1);
+  }
+  const lastIp = new Map(), target = new Map();
+  for (const m of list) {
+    const grid = health(m) === "off" ? offlineGrid : activeGrid;
+    const skey = (grid === offlineGrid ? "off " : "on ") + ipOf(m);
+    const st = ipStats.get(skey);
+    const majority = [...st.regions.entries()].sort((a, b) => b[1] - a[1])[0];
+    const mixed = st.regions.size > 1;
+    if (byip && lastIp.get(grid) !== skey) {   // caja nueva: una por IP, plegable
+      lastIp.set(grid, skey);
+      const box = document.createElement("details");
+      box.className = "ipbox" + (mixed ? " mix" : "");
+      box.open = !collapsedIps.has(skey);
+      box.ontoggle = () => box.open ? collapsedIps.delete(skey) : collapsedIps.add(skey);
+      const sum = document.createElement("summary");
+      sum.textContent = "📡 " + ipOf(m) + " · " + st.n + (grid === offlineGrid ? " offline" : " activas")
+        + (st.regions.size ? " · " + [...st.regions].map(([r, c]) => r + " ×" + c).join(", ") : "")
+        + (mixed ? " · ⚑ regiones mezcladas" : "");
+      const inner = document.createElement("div");
+      inner.className = "machine-grid";
+      box.append(sum, inner);
+      grid.appendChild(box);
+      target.set(grid, inner);
+    }
+    const d = document.createElement("div");
+    const dup = m.binding && userCount.get(m.binding.user_id) > 1;
+    const expired = m.binding && health(m) === "off";
+    d.className = "card " + health(m) + (selected.has(m.machine_id) ? " sel" : "") + (dup ? " dup" : "");
+    const age = m.seconds_since_seen == null ? "nunca"
+      : m.seconds_since_seen < 90 ? m.seconds_since_seen + "s" : Math.floor(m.seconds_since_seen / 60) + "m";
+    const title = m.binding ? m.binding.name : (m.location || m.machine_id);
+    d.innerHTML = `<div class="id">${title}</div>
+      <div class="meta">${m.binding
+        ? "<b>" + (m.binding.region || "sin sede") + "</b>" + (m.binding.seat ? " · asiento " + m.binding.seat : "") + " · "
+        : ""}<span class="muted">${m.machine_id}</span></div>
+      <div class="meta">${m.location ? "📍 " + m.location : "<span class='muted'>📍 sin ubicación</span>"} · ${m.hostname || ""} · visto ${age}</div>
+      <div class="meta">editores: ${m.editors && Object.keys(m.editors).length
+        ? Object.entries(m.editors).map(([k, v]) => k + " ×" + v).join(" · ")
+        : "<span class='muted'>ninguno</span>"}</div>
+      <div class="chips">
+        ${dup ? '<span class="chip" style="background:var(--bad);color:#fff">⧉ posible sesión duplicada</span>' : ''}
+        ${expired ? '<span class="chip" style="background:var(--off);color:#fff">⏻ sesión expirada</span>' : ''}
+        ${mixed && m.binding && m.binding.region && m.binding.region !== majority[0]
+          ? '<span class="chip" style="background:var(--warn);color:#fff">⚑ IP de ' + majority[0] + '</span>' : ''}
+        ${m.binding && m.binding.region_mismatch ? '<span class="chip" style="background:var(--warn);color:#fff">⚑ sede ' + m.binding.region + '</span>' : ''}
+        ${m.lock_state ? '<span class="chip">🔒</span>' : ''}
+        ${m.frozen ? '<span class="chip">✋ NO TOCAR</span>' : ''}
+        ${m.usb === "allowed" ? '<span class="chip">USB</span>' : ''}
+        ${m.virt && m.virt !== "none" ? '<span class="chip">VM:' + m.virt + '</span>' : ''}
+        ${m.open_alerts ? '<span class="chip">⚠ ' + m.open_alerts + '</span>' : ''}
+        ${m.mem != null ? '<span class="chip">mem ' + m.mem + '%</span>' : ''}
+      </div>`;
+    d.onclick = e => { if (e.shiftKey) { toggle(m.machine_id); } else { openDetail(m); } };
+    d.oncontextmenu = e => { e.preventDefault(); toggle(m.machine_id); };
+    (byip ? target.get(grid) : grid).appendChild(d);
+  }
+  $("#activecount").textContent = activeGrid.querySelectorAll(".card").length;
+  $("#offlinecount").textContent = offlineGrid.querySelectorAll(".card").length;
+  setStatus(`${machines.length} máquinas · ${selected.size} marcadas · ${new Date().toLocaleTimeString()}`);
+}
+function toggle(id) { selected.has(id) ? selected.delete(id) : selected.add(id); render(); }
+$("#selall").onclick = () => { machines.filter(visible).forEach(m => selected.add(m.machine_id)); render(); };
+$("#selnone").onclick = () => { selected.clear(); render(); };
+$("#group").onchange = () => { render(); loadAllowlist(); loadHomepage(); loadLogo(); };
+$("#filter").onchange = render;
+$("#qteam").oninput = render;
+$("#byip").onchange = render;
+
+// Debe reflejar SUPERADMIN_ONLY en server.py: un coordinador de sede puede
+// bloquear/restringir pero no destrabar red/USB, recolectar código, ni
+// cambiar a qué dominios llegan las máquinas.
+const SUPERADMIN_ONLY_ACTIONS = new Set([
+  "unlock-root", "lock-root", "net-open", "usb-block", "usb-unblock",
+  "collect-home", "set-allowlist",
+]);
+// Deshabilitados temporalmente: bloquear/no tocar/reactivar dan problemas.
+const DISABLED_ACTIONS = new Set(["lock", "donottouch", "cantouch"]);
+function applyScopeUI() {
+  document.querySelectorAll("[data-a]").forEach(b => {
+    b.hidden = DISABLED_ACTIONS.has(b.dataset.a) || (scope && SUPERADMIN_ONLY_ACTIONS.has(b.dataset.a));
+  });
+  $("#allowbox").hidden = !!scope;
+  $("#dlhomes").closest(".bar").hidden = !!scope;
+}
+
+async function refresh() {
+  if (!tok.value.trim()) { setStatus("ingresá el token"); return; }
+  try {
+    const d = await (await api("/admin/machines")).json();
+    machines = d.machines; scope = d.scope;
+    applyScopeUI();
+    render();
+    const cs = await (await api("/admin/commands?limit=40")).json();
+    $("#log").textContent = cs.commands.map(c =>
+      `${c.issued_at}  ${c.action.padEnd(13)} ${(c.machine_id === "*" ? "grupo " + c.group_id : c.machine_id).padEnd(22)} ${c.delivered}/${c.acked}  [${c.status}]`
+    ).join("\n") || "—";
+    await refreshAlerts();
+    await refreshQuota();
+  } catch (e) {}
+}
+
+// Cupos: por sede, equipos conectados vs esperados (users.json) y los que faltan.
+const quotaOpen = new Set();   // sedes desplegadas: sobreviven al refresh
+const quotaEsc = s => String(s ?? "").replace(/[<>&"]/g, "");
+async function refreshQuota() {
+  const { quota } = await (await api("/admin/quota")).json();
+  const box = $("#quota");
+  box.innerHTML = "";
+  for (const q of quota.filter(q => q.expected || q.machines)) {
+    const d = document.createElement("details");
+    d.open = quotaOpen.has(q.group_id);
+    d.ontoggle = () => d.open ? quotaOpen.add(q.group_id) : quotaOpen.delete(q.group_id);
+    const falta = q.expected - q.connected;
+    const s = document.createElement("summary");
+    s.innerHTML = `<b>${quotaEsc(q.label)}</b> · ${q.connected}/${q.expected} equipos`
+      + (q.expected && !falta ? " ✅ completa" : falta > 0 ? ` · faltan <b>${falta}</b>` : "")
+      + (q.no_login ? ` · ${q.no_login} PC sin login` : "");
+    const list = document.createElement("div");
+    list.className = "chips";
+    list.innerHTML = q.missing.map(u => `<span class="chip">${quotaEsc(u.team_name)} (${quotaEsc(u.username)})</span>`).join("")
+      || '<span class="muted">nadie falta</span>';
+    d.append(s, list);
+    box.appendChild(d);
+  }
+  if (!box.childElementCount) box.textContent = "—";
+}
+
+async function refreshAlerts() {
+  const a = await (await api("/admin/alerts")).json();
+  const bar = $("#alertbar");
+  if (!a.alerts.length) { bar.className = ""; bar.textContent = ""; return; }
+  bar.className = "on";
+  bar.innerHTML = "⚠ " + a.alerts.length + " alerta(s): " + a.alerts.slice(0, 4).map(x =>
+    `${x.machine_id} ${x.kind}${x.detail ? " (" + x.detail + ")" : ""} <button data-id="${x.id}">dispensar</button>`
+  ).join(" · ");
+  bar.querySelectorAll("button").forEach(b => b.onclick = async () => {
+    await api(`/admin/alerts/${b.dataset.id}/dismiss`, { method: "POST" }); refreshAlerts(); refresh();
+  });
+}
+
+$("#report").onclick = e => {
+  e.preventDefault();
+  const g = $("#group").value;
+  const u = "/admin/report?token=" + encodeURIComponent(tok.value.trim()) + (g ? "&group=" + g : "");
+  window.open(u, "_blank");
+};
+
+$("#credentials").onclick = e => {
+  e.preventDefault();
+  const g = $("#group").value;
+  const u = "/admin/credentials?token=" + encodeURIComponent(tok.value.trim()) + (g ? "&group=" + g : "");
+  window.open(u, "_blank");
+};
+
+$("#dlhomes").onclick = e => {
+  e.preventDefault();
+  const g = $("#group").value || scope;
+  if (!g) return alert("Elegí un grupo primero.");
+  window.open("/admin/homes/" + encodeURIComponent(g) + "?token=" + encodeURIComponent(tok.value.trim()), "_blank");
+};
+
+document.querySelectorAll(".actions button").forEach(b => b.onclick = () => send(b.dataset.a));
+
+async function send(action) {
+  const args = {};
+  if (action === "message") { const t = prompt("Mensaje:"); if (!t) return; args.text = t; }
+  if (action === "set-wallpaper") { const u = prompt("URL de imagen (host allowlisted):"); if (!u) return; args.url = u.trim(); }
+  if (action === "set-allowlist") { const r = prompt("Hosts permitidos (coma):", ""); if (r == null) return; args.hosts = r.split(",").map(s => s.trim()).filter(Boolean); }
+  if (action === "logout" && !confirm("¿Cerrar sesión en " + (selected.size || "el grupo") + "? Vuelve a la pantalla de login y sale de esta lista.")) return;
+
+  const picked = [...selected];
+  let targets, n;
+  if (picked.length) { targets = picked.map(machine_id => ({ machine_id })); n = picked.length; }
+  else {
+    const g = $("#group").value;
+    if (!g && action === "screenshot" && !scope) {   // toda Bolivia: solo superadmin
+      targets = [{ all: true }]; n = machines.length;
+    } else if (!g) return alert("Marcá máquinas (shift-click / clic derecho) o elegí un grupo.");
+    else {
+      targets = [{ group_id: g, machine_id: "*" }];
+      n = machines.filter(m => m.group_id === g).length;
+    }
+  }
+  if (n >= 20) {
+    if (prompt(`Vas a mandar "${action}" a ${n} máquinas. Escribí ${n} para confirmar:`) !== String(n)) return;
+  } else if (!picked.length) {
+    if (!confirm(`Enviar "${action}" a todo el grupo (${n})?`)) return;
+  }
+  for (const target of targets) {
+    const r = await api("/admin/cmd", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target, action, args }),
+    });
+    if (!r.ok) { alert("error: " + (await r.text())); return; }
+  }
+  refresh();
+}
+
+async function openDetail(m) {
+  const d = await (await api(`/admin/machines/${m.group_id}/${m.machine_id}`)).json();
+  const dlg = $("#detail");
+  const st = d.status || {};
+  dlg.innerHTML = `<h3>${d.binding ? d.binding.name : (d.location || m.machine_id)}
+      <span class="muted">${m.group_id} · ${m.machine_id}</span></h3>
+    <div class="bar">
+      <button data-a="lock">🔒 lock</button><button data-a="unlock">🔓 unlock</button>
+      <button data-a="logout">🚪 cerrar sesión</button>
+      <button data-a="message">msg</button><button data-a="screenshot">📷 captura</button>
+      <button data-a="collect-home">📦 recoger código</button>
+      <button data-a="reboot">reboot</button>
+      <button id="bind">asignar equipo…</button>
+      <button id="loc">📍 ubicación…</button>
+      <button id="close">cerrar</button>
+    </div>
+    <p class="muted">ubicación: ${d.location ? "<b>" + d.location + "</b>" : "<i>sin definir</i>"}</p>
+    ${scope ? "" : `<div class="bar">
+      <span class="muted" style="font-size:.75rem">debug (solo superadmin):</span>
+      <button data-a="unlock-root">🔑 habilitar root</button>
+      <button data-a="lock-root">🔒 bloquear root</button>
+    </div>`}
+    <p class="muted">estado hace ${d.status_age == null ? "—" : d.status_age + "s"} ·
+      mem ${st.mem ?? "?"}% · load ${st.ld ?? "?"} · disco ${st.hd ?? "?"}% ·
+      virt ${st.virt ?? "?"} · usb ${st.usb ?? "?"} · lock ${d.lock_state} · frozen ${d.frozen}</p>
+    <p class="muted">código recogido: ${d.home_age == null ? "todavía no"
+      : "hace " + (d.home_age < 90 ? d.home_age + "s" : Math.floor(d.home_age / 60) + "m")
+        + " · " + (d.home_size != null ? (d.home_size / 1048576).toFixed(1) + " MB" : "?")
+        + ' · <a href="/admin/machines/' + m.group_id + '/' + m.machine_id + '/home?token='
+        + encodeURIComponent(tok.value.trim()) + '" target="_blank">descargar .tar.gz</a>'}</p>
+    <p class="muted">equipo: ${d.binding ? d.binding.name + (d.binding.seat ? " (asiento " + d.binding.seat + ")" : "")
+        + (d.binding.region ? " · sede reportada en login: <b>" + d.binding.region + (d.binding.region_name ? " (" + d.binding.region_name + ")" : "") + "</b>"
+            + (d.binding.region_mismatch ? " ⚑ NO coincide con el grupo " + m.group_id : "") : "")
+      : "sin equipo asignado"}</p>
+    <img id="shot" alt="" style="max-width:100%;border:1px solid var(--b);${d.screenshot_age == null ? "display:none" : ""}"
+      src="/admin/machines/${m.group_id}/${m.machine_id}/screenshot?token=${encodeURIComponent(tok.value.trim())}&t=${Date.now()}">
+    <div id="shotstrip" style="display:flex;gap:.3rem;overflow-x:auto;margin-top:.4rem"></div>
+    <p class="muted" id="shotmeta">${d.screenshot_age == null ? "sin captura" : "captura hace " + d.screenshot_age + "s"}</p>
+    <p class="muted">editores: ${Object.keys(st.editors || {}).length
+      ? Object.entries(st.editors).map(([k, v]) => k + "×" + v).join(" · ") : "—"}</p>
+    <h4>Tiempo por programa</h4>
+    <p class="muted">${Object.entries(d.app_usage || {}).sort((a, b) => b[1] - a[1])
+      .map(([k, s]) => k.replace(/[<>&]/g, "") + " " + Math.floor(s / 3600) + "h" + String(Math.floor(s % 3600 / 60)).padStart(2, "0") + "m")
+      .join(" · ") || "—"}</p>
+    <h4>Historial de programas</h4>
+    <table><tr><th>programa<th>inicio<th>fin<th>duración</tr>
+      ${(d.app_history || []).map(a => {
+        const f = t => new Date(t * 1000).toLocaleTimeString(), s = Math.max(a.last_at - a.started_at, 0);
+        return `<tr><td>${a.app.replace(/[<>&]/g, "")}<td>${f(a.started_at)}<td>${a.open ? "en curso" : f(a.last_at)}<td>${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s</tr>`;
+      }).join("") || "<tr><td colspan=4 class=muted>—</tr>"}</table>
+    <h4>Alertas</h4>
+    <table><tr><th>cuándo<th>tipo<th>detalle<th>dispensada</tr>
+      ${d.alerts.map(a => `<tr><td>${a.raised_at}<td>${a.kind}<td>${a.detail || ""}<td>${a.dismissed_by || ""} ${a.dismissed_at || ""}</tr>`).join("") || "<tr><td colspan=4 class=muted>—</tr>"}</table>
+    <h4>Comandos</h4>
+    <table><tr><th>cuándo<th>acción<th>en esta máquina<th>detalle</tr>
+      ${d.commands.map(c => {
+        // Para "toda la sede" (machine_id='*') c.status queda "pending" siempre;
+        // lo que importa por máquina es su entrega/ack.
+        const st = c.ack_status ? c.ack_status.toUpperCase()
+                 : c.acked_at ? "acked"
+                 : c.delivered_at ? "entregado"
+                 : c.status;
+        return `<tr><td>${c.issued_at}<td>${c.action}<td>${st}<td>${c.detail || ""}</tr>`;
+      }).join("") || "<tr><td colspan=4 class=muted>—</tr>"}</table>
+    <h4>Journal</h4><pre>${(d.journal || "—").replace(/[<>]/g, "")}</pre>`;
+  applyScopeUI();
+  dlg.querySelector("#close").onclick = () => dlg.close();
+  dlg.querySelectorAll(".bar [data-a]").forEach(b => b.onclick = async () => {
+    const args = {};
+    if (b.dataset.a === "message") { const t = prompt("Mensaje:"); if (!t) return; args.text = t; }
+    if (b.dataset.a === "unlock-root") {
+      const p = prompt("Contraseña para root en " + m.machine_id + " (viaja en claro por el canal de control):");
+      if (!p) return; args.password = p;
+    }
+    if (b.dataset.a === "lock-root" && !confirm("¿Volver a bloquear root en " + m.machine_id + "?")) return;
+    if (b.dataset.a === "logout" && !confirm("¿Cerrar sesión en " + m.machine_id + "? Vuelve a la pantalla de login y sale de esta lista.")) return;
+    const r = await api("/admin/cmd", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: { machine_id: m.machine_id }, action: b.dataset.a, args }) });
+    if (!r.ok) { alert("error: " + (await r.text())); return; }
+    if (b.dataset.a === "screenshot") {
+      $("#shotmeta").textContent = "capturando… (se actualiza en unos segundos)";
+      setTimeout(() => {
+        const img = $("#shot");
+        img.src = `/admin/machines/${m.group_id}/${m.machine_id}/screenshot?token=${encodeURIComponent(tok.value.trim())}&t=${Date.now()}`;
+        img.style.display = ""; $("#shotmeta").textContent = "captura recién pedida";
+      }, 5000);
+      return;
+    }
+    dlg.close(); refresh();
+  });
+  dlg.querySelector("#bind").onclick = async () => {
+    const uid = prompt("user_id del equipo (del roster), vacío = quitar la asignación:");
+    if (uid == null) return;
+    await api(`/admin/machines/${m.group_id}/${m.machine_id}/binding`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid }) });
+    dlg.close(); refresh();
+  };
+  dlg.querySelector("#loc").onclick = async () => {
+    const loc = prompt("Ubicación física de la máquina (ej: Sala 3, PC 12). Vacío = borrar:", d.location || "");
+    if (loc == null) return;
+    await api(`/admin/machines/${m.group_id}/${m.machine_id}/location`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: loc }) });
+    dlg.close(); refresh();
+  };
+  // Historial de capturas del equipo (mas nuevas primero); clic = verla grande.
+  const tk = encodeURIComponent(tok.value.trim()), base = `/admin/machines/${m.group_id}/${m.machine_id}`;
+  api(`${base}/shots`).then(r => r.json()).then(({ shots }) => {
+    const strip = $("#shotstrip");
+    if (!strip) return;
+    strip.innerHTML = "";
+    for (const ts of shots.slice(0, 40)) {   // las 40 mas nuevas; el resto sigue en disco
+      const im = document.createElement("img");
+      im.src = `${base}/shots/${ts}?token=${tk}`;
+      im.loading = "lazy";
+      im.title = new Date(+ts).toLocaleTimeString();
+      im.style.cssText = "height:56px;border:1px solid var(--b);border-radius:4px;cursor:pointer";
+      im.onclick = () => {
+        $("#shot").src = im.src; $("#shot").style.display = "";
+        $("#shotmeta").textContent = "captura de " + im.title;
+      };
+      strip.appendChild(im);
+    }
+  }).catch(() => {});
+  dlg.showModal();
+}
+
+async function loadAllowlist() {
+  const g = $("#group").value || scope;
+  const box = $("#allowbox");
+  if (!g) { box.hidden = true; return; }
+  box.hidden = false;
+  try {
+    const d = await (await api("/admin/allowlist?group=" + encodeURIComponent(g))).json();
+    $("#allowlist").value = (d.hosts || []).join("\n");
+    $("#allowmeta").textContent = d.updated_at ? "guardada " + d.updated_at : "sin guardar aún";
+  } catch (e) {}
+}
+$("#allowsave").onclick = async () => {
+  const g = $("#group").value || scope;
+  if (!g) return alert("Elegí un grupo primero.");
+  const hosts = $("#allowlist").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const r = await api("/admin/allowlist", { method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group_id: g, hosts }) });
+  if (r.ok) { $("#allowmeta").textContent = "aplicada a " + g + " ✓"; refresh(); loadAllowlist(); }
+  else alert("error: " + (await r.text()));
+};
+
+async function loadHomepage() {
+  const g = $("#group").value || scope || "__global__";
+  try {
+    const d = await (await api("/admin/homepage?group=" + encodeURIComponent(g))).json();
+    $("#homepage").value = d.url;
+    $("#homepagemeta").textContent = d.updated_at ? "guardada " + d.updated_at : "valor predeterminado";
+  } catch (e) {}
+}
+$("#homepagesave").onclick = async () => {
+  const g = $("#group").value || scope || "__global__";
+  const url = $("#homepage").value.trim();
+  const r = await api("/admin/homepage", { method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group_id: g, url }) });
+  if (r.ok) { $("#homepagemeta").textContent = "guardada para los próximos logins ✓"; }
+  else alert("error: " + (await r.text()));
+};
+
+async function loadLogo() {
+  const g = $("#group").value || scope || "__global__";
+  try {
+    const d = await (await api("/admin/logo?group=" + encodeURIComponent(g))).json();
+    $("#logourl").value = d.url || "";
+    $("#logourl").placeholder = d.inherited ? d.effective_url : "https://contest.example/logo.svg";
+    $("#logometa").textContent = d.inherited ? "heredando el logo global"
+      : d.updated_at ? "guardado " + d.updated_at : "sin configurar";
+  } catch (e) {}
+}
+$("#logosave").onclick = async () => {
+  const g = $("#group").value || scope || "__global__";
+  const url = $("#logourl").value.trim();
+  const r = await api("/admin/logo", { method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group_id: g, url }) });
+  if (r.ok) loadLogo();
+  else alert("error: " + (await r.text()));
+};
+
+function connectSSE() {
+  if (es) es.close();
+  es = new EventSource("/admin/events?token=" + encodeURIComponent(tok.value.trim()));
+  const bump = () => refresh();
+  ["command.sent", "command.acked", "machine.first_seen", "machine.locked",
+   "machine.unlocked", "alert.raised", "alert.dismissed", "machine.bound", "machine.unbound",
+   "machine.logged_out", "machine.located", "homepage.changed", "logo.changed"]
+    .forEach(t => es.addEventListener(t, bump));
+  es.onerror = () => {};
+}
+
+function boot() {
+  if (!tok.value.trim()) return;
+  refresh().then(() => { loadAllowlist(); loadHomepage(); loadLogo(); }); connectSSE();
+}
+setInterval(refresh, 10000);
+boot();
+</script>
+</body>
+</html>

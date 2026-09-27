@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1920" height="1080" viewBox="0 0 1920 1080">
+
+  <rect width="1920" height="1080" fill="#000000"/>
+
+  <!-- Logo ICPC Bolivia -->
+  <g id="logo" transform="translate(660 180) scale(0.6)">
+    <defs>
+      <style>
+        .blue{fill:#1688c9}
+        .yellow{fill:#ffbd00}
+        .red{fill:#df2b17}
+        .line{fill:none;stroke:#f4f0dd;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+        .txt{font-family:Arial,Helvetica,sans-serif;font-weight:700}
+      </style>
+    </defs>
+
+    <rect x="0" y="140" width="158" height="118" rx="20" class="blue"/>
+    <path class="line" d="M43 226
+      C28 225 21 218 21 208
+      C21 198 29 191 42 190
+      C38 183 40 175 47 169
+      C54 164 64 164 72 169
+      C78 160 88 158 97 164
+      C108 158 124 161 135 169
+      C150 170 162 181 163 194
+      C165 205 159 216 149 222
+      C139 228 128 228 118 225
+      C106 232 88 234 74 228
+      C66 232 55 232 48 228 Z"/>
+
+    <circle cx="88" cy="281" r="9" class="line"/>
+    <circle cx="57" cy="291" r="7" class="line"/>
+    <circle cx="30" cy="298" r="5" class="line"/>
+
+    <rect x="183" y="140" width="152" height="118" rx="20" class="yellow"/>
+
+    <g stroke="#ffbd00" stroke-width="7" stroke-linecap="round">
+      <path d="M258 60v28"/>
+      <path d="M228 65l11 26"/>
+      <path d="M287 65l-11 26"/>
+      <path d="M203 84l20 19"/>
+      <path d="M313 83l-20 19"/>
+      <path d="M188 107l27 10"/>
+      <path d="M330 106l-27 11"/>
+    </g>
+
+    <path class="line" d="M215 141
+      C215 165 224 174 236 180
+      L241 201 H275 L280 180
+      C292 174 301 164 301 141"/>
+    <path class="line" d="M259 141l-10 9 17 6-12 9 13 8"/>
+    <path class="line" d="M242 211h32M244 221h28M249 231h18"/>
+
+    <rect x="367" y="140" width="153" height="118" rx="20" class="red"/>
+
+    <path d="M440 3
+      C413 3 392 23 392 48
+      C392 73 406 93 429 107
+      C425 112 417 116 409 116
+      C411 123 422 127 433 122
+      C434 127 439 134 440 135
+      C442 132 446 126 447 122
+      C458 127 470 123 472 116
+      C463 116 455 112 451 107
+      C474 93 488 73 488 48
+      C488 23 467 3 440 3 Z"
+      fill="none" stroke="#df2b17" stroke-width="5" stroke-linejoin="round"/>
+
+    <path d="M440 134
+      C443 151 466 161 478 177
+      C491 195 488 216 467 235
+      C446 254 417 266 389 278"
+      fill="none" stroke="#f4f0dd" stroke-width="3" stroke-linecap="round"/>
+
+    <text x="543" y="253" class="txt blue" font-size="151" letter-spacing="-8">icpc</text>
+    <text x="625" y="374" class="txt blue" font-size="112" letter-spacing="-4">Bolivia</text>
+  </g>
+
+  <!-- Campos dinámicos -->
+  <text id="team-name"
+        x="960" y="590"
+        fill="#ffffff"
+        font-family="Fira Sans, sans-serif"
+        font-size="100"
+        font-weight="700"
+        text-anchor="middle">
+    {{NAME}}
+  </text>
+
+  <text id="team-id"
+        x="960" y="670"
+        fill="#8f9aa3"
+        font-family="Fira Sans, sans-serif"
+        font-size="30"
+        text-anchor="middle">
+    Equipo: {{TEAM_ID}}
+  </text>
+
+</svg>
+
+
