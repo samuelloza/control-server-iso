@@ -1,11 +1,4 @@
-# Infra del coordinador: control remoto, login y NTP del concurso.
-# APARTE del build del ISO (nada de esto entra al squashfs). Se levanta en el
-# servidor nacional:  docker compose up -d
-#
-# Antes:  ./make-keys.sh
-#         ./make-groups.sh lapaz sucre cbba ...     (o cp groups.json.example groups.json)
-#         cp users.json.example users.json          (editar credenciales del login)
-#         cp .env.example .env
+# Antes: ./make-keys.sh, ./make-groups.sh <sedes...>, users.json y .env
 services:
   control-server:
     build:
@@ -23,8 +16,6 @@ services:
     restart: unless-stopped
 
   auth:
-    # Login del concurso (lo que consulta la ISO en AUTH_SERVICE_URL). Valida
-    # contra users.json; el enrollToken de cada sede sale de groups.json.
     build:
       context: .
     command: ["python3", "auth-server.py"]
@@ -40,9 +31,7 @@ services:
     restart: unless-stopped
 
   ntp:
-    # Servidor NTP para las máquinas del concurso. Su IP pública va en
-    # NET_NTP_SERVERS (config/iso.conf).
-    # OJO: limitá el puerto 123 a las IPs de las sedes con firewall.
+    # limitar el 123 a las IPs de las sedes
     build:
       context: .
       dockerfile: ntp/Dockerfile

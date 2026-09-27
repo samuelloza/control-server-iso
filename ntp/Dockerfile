@@ -11,6 +11,5 @@ EXPOSE 123/udp
 
 COPY ntp/chrony.conf /etc/chrony/chrony.conf
 
-# -n: primer plano.  -x: no tocar el reloj del host (sin CAP_SYS_TIME); chronyd
-# igual rastrea el offset por software y lo sirve.
+# -x: no toca el reloj del host
 CMD ["chronyd", "-n", "-x", "-f", "/etc/chrony/chrony.conf"]

@@ -45,25 +45,20 @@ SAMPLES_PER_MACHINE = 400
 JOURNAL_BYTES_PER_MACHINE = 65536
 SCREENSHOT_DIR = _env_path("CONTROL_SCREENSHOT_DIR", "data/screenshots")
 SCREENSHOT_MAX_BYTES = 6 * 1024 * 1024
-# 'collect-home': tar.gz del home de cada equipo, para juntar el código al final.
 HOME_DIR = _env_path("CONTROL_HOME_DIR", "data/homes")
 HOME_MAX_BYTES = 400 * 1024 * 1024
 HOME_KEEP = 10       # copias de codigo por equipo
 PHASES = ("idle", "practice", "live", "frozen", "ended")
-# Alertas calculadas en el servidor con los datos que ya llegan (sin tocar la ISO).
 OFFLINE_SECS = 90    # sin reportar -> offline
-OFFLINE_PHASES = ("practice", "live", "frozen")                    # solo vigilamos en concurso
+OFFLINE_PHASES = ("practice", "live", "frozen")
 DISK_FULL_PCT = 95
 STATUS_EVERY = 30   # las PCs reportan estado cada ~29s (medido en samples)
-# Historial de capturas manuales en disco, por equipo (sobrevive reinicios).
 SHOT_KEEP = 20       # ultimas N por equipo
 
 MACHINE_ID_RE = "[A-Za-z0-9._-]{1,64}"
 _MID_OK = re.compile(r"\A%s\Z" % MACHINE_ID_RE).match
 
-# action -> required arg keys. Anything not listed here is rejected.
-# 'precontest', 'donottouch', 'cantouch', 'net-open', 'net-lock' are macros /
-# state actions handled partly server-side (see _apply_state).
+# accion -> args obligatorios. Lo que no esta aqui se rechaza.
 ACTIONS = {
     "lock": (),
     "unlock": (),
@@ -87,31 +82,25 @@ ACTIONS = {
     "unlock-root": ("password",),   # solo superadmin (ver _admin_cmd)
     "lock-root": (),                # solo superadmin
 }
-# Acciones peligrosas: solo el token superadmin (no un coordinador de sede).
-# net-open/usb-unblock aflojan seguridad, collect-home saca el código de las
-# máquinas y set-allowlist cambia a qué dominios llegan: un coordinador de
-# sede puede bloquear/restringir pero no destrabar ni recolectar.
+# Solo superadmin: el coordinador de sede puede bloquear pero no abrir red/USB ni sacar codigo.
 SUPERADMIN_ONLY = {
     "unlock-root", "lock-root",
     "net-open", "usb-block", "usb-unblock", "collect-home", "set-allowlist",
 }
-# Commands still handed to a frozen machine (unfreeze, and the freeze itself so
-# the agent can set its local flag too).
+# Lo unico que se entrega a una maquina congelada.
 FROZEN_ALLOWED = {"cantouch", "donottouch"}
 MAX_PAYLOAD_BYTES = 8192
 MAX_BODY_BYTES = 262144
 
-# ponytail: one global DB lock + one condvar for long-poll wakeups; fine at
-# contest scale (hundreds of machines). Per-group condvars if it ever matters.
+# Un lock global para la DB; alcanza para unos cientos de maquinas.
 _DB_LOCK = threading.RLock()
 _CMD_COND = threading.Condition()
 _conn = None
 
 _SUBS_LOCK = threading.Lock()
-_SUBSCRIBERS = []  # list of (scope_group_or_None, queue.Queue)
+_SUBSCRIBERS = []  # (grupo o None, queue)
 
 
-# --------------------------------------------------------------------------- db
 
 def db():
     global _conn
@@ -321,7 +310,6 @@ def users_for_group(group_id):
     return out
 
 
-# ------------------------------------------------------------------------ pubsub
 
 def publish(evt, data, group_id=None):
     msg = f"event: {evt}\ndata: {json.dumps(data)}\n\n"
@@ -334,7 +322,6 @@ def publish(evt, data, group_id=None):
                     pass
 
 
-# ---------------------------------------------------------------- state actions
 
 def _targets(conn, group_id, machine_id):
     if machine_id == "*":
@@ -344,15 +331,12 @@ def _targets(conn, group_id, machine_id):
 
 
 def _apply_state(conn, group_id, machine_id, action):
-    """Server-side effect of state/macro actions (in addition to delivering the
-    signed command to the agent)."""
+    """Efecto en el servidor de lock/unlock/logout, ademas del comando."""
     mids = _targets(conn, group_id, machine_id)
     if not mids:
         return
     qmarks = ",".join("?" * len(mids))
-    # lock_state applies immediately so a machine that reboots re-locks before it
-    # even acks. frozen is applied on ack instead (see _ack) so the donottouch /
-    # cantouch command itself still gets delivered in queue order.
+    # lock_state va ya, asi una PC que reinicia se vuelve a bloquear. frozen se pone en el ack.
     if action in ("lock", "precontest"):
         conn.execute(f"UPDATE machines SET lock_state=1 WHERE machine_id IN ({qmarks})", mids)
         for m in mids:
@@ -362,8 +346,7 @@ def _apply_state(conn, group_id, machine_id, action):
         for m in mids:
             publish("machine.unlocked", {"machine_id": m}, group_id)
     elif action == "logout":
-        # Quita la asignacion de equipo y saca la maquina de la vista principal
-        # hasta que alguien vuelva a loguearse ahi (auto_bind limpia hidden_at).
+        # se oculta hasta el proximo login
         conn.execute(f"UPDATE machines SET binding_json=NULL, hidden_at=? WHERE machine_id IN ({qmarks})",
                      [iso(now())] + mids)
         for m in mids:
@@ -371,9 +354,7 @@ def _apply_state(conn, group_id, machine_id, action):
 
 
 def enqueue_command(conn, group_id, machine_id, action, args, ttl=None):
-    """Build, sign and store one signed command. Caller holds _DB_LOCK.
-    Raises ValueError (payload too big) or RuntimeError (openssl). Returns the
-    payload dict."""
+    """Firma y guarda un comando. Llamar con _DB_LOCK tomado."""
     issued = now()
     expires = issued + timedelta(seconds=max(60, ttl or COMMAND_TTL_SECONDS))
     payload_obj = {
@@ -402,7 +383,7 @@ def stored_allowlist(conn, group_id):
 
 
 def raise_alert(conn, group_id, machine_id, kind, detail=None):
-    """Una alerta abierta por (maquina, tipo, detalle). -> (id, es_nueva)."""
+    """Devuelve (id, es_nueva); no duplica alertas abiertas."""
     dup = conn.execute(
         "SELECT id FROM alerts WHERE group_id=? AND machine_id=? AND kind=? "
         "AND IFNULL(detail,'')=IFNULL(?,'') AND dismissed_at IS NULL",
@@ -422,11 +403,7 @@ def resolve_alerts(conn, machine_id, kind):
 
 
 def detect_restart(conn, group_id, machine_id, uid):
-    """El machine_id de la ISO live cambia en cada arranque: el mismo equipo aparece
-    con un machine_id nuevo y el anterior lleva rato en silencio = la PC se reinicio
-    o colgo. No alerta si el logout la oculto, si el anterior sigue reportando (dos
-    PCs del mismo equipo) ni si un admin ordeno reboot/poweroff hace poco.
-    La IP no sirve: es la IP publica de la sede, compartida por todas sus PCs."""
+    """Mismo equipo con machine_id nuevo y el viejo callado = la PC se reinicio sola."""
     for old in conn.execute(
             "SELECT machine_id, last_seen FROM machines WHERE group_id=? AND machine_id!=? "
             "AND hidden_at IS NULL AND json_extract(binding_json,'$.user_id')=?",
@@ -448,10 +425,7 @@ def detect_restart(conn, group_id, machine_id, uid):
 
 
 def check_offline():
-    """PC que dejo de reportar durante el concurso -> alerta 'offline'.
-    Solo PCs con equipo logueado. ponytail: ventana 1h para no alertar PCs viejas al
-    arrancar el servidor; una PC reemplazada (mismo equipo con last_seen mas nuevo,
-    p.ej. tras reiniciar) no cuenta."""
+    """Alerta 'offline' para PCs con equipo que dejaron de reportar (ultima hora)."""
     with _DB_LOCK:
         conn = db()
         live = {r["group_id"] for r in conn.execute("SELECT group_id, phase FROM group_config")
@@ -485,7 +459,7 @@ def stored_phase(conn, group_id):
 
 
 def stored_cfg(conn, group_id, col):
-    """(propio, efectivo con fallback a '__global__', updated_at) para homepage o logo_url."""
+    """(propio, efectivo, updated_at); efectivo cae a '__global__'."""
     ts = "homepage_updated_at" if col == "homepage" else "logo_updated_at"
     row = conn.execute(f"SELECT {col}, {ts} FROM group_config WHERE group_id=?",
                        (group_id,)).fetchone()
@@ -508,9 +482,7 @@ def valid_logo_url(url):
 
 
 def auto_bind(conn, group_id, machine_id, login):
-    """La máquina reporta qué equipo inició sesión -> se liga sola. Si el
-    user_id está en teams usa ese registro (con asiento, etc.); si no,
-    liga con el nombre auto-reportado. Devuelve el binding nuevo o None."""
+    """Liga la maquina al equipo que inicio sesion. Devuelve el binding nuevo o None."""
     uid = str(login.get("user_id") or login.get("team_id") or "").strip()
     if not uid:
         return None
@@ -549,7 +521,7 @@ def _safe_seg(s):
 
 
 def shot_owner(conn, machine_id):
-    """Historial por equipo (user_id), no por machine_id: este cambia en cada arranque."""
+    """user_id del equipo, o machine_id si no hay login."""
     r = conn.execute("SELECT binding_json FROM machines WHERE machine_id=?", (machine_id,)).fetchone()
     b = json.loads(r["binding_json"]) if r and r["binding_json"] else {}
     return b.get("user_id") or machine_id
@@ -560,7 +532,7 @@ def shot_hist_dir(group_id, owner):
 
 
 def shot_hist_list(group_id, owner):
-    """Marcas de tiempo (epoch, ms) de las capturas guardadas, mas nuevas primero."""
+    """Timestamps en ms, mas nuevos primero."""
     try:
         names = [n[:-4] for n in os.listdir(shot_hist_dir(group_id, owner)) if n.endswith(".png")]
     except OSError:
@@ -569,13 +541,12 @@ def shot_hist_list(group_id, owner):
 
 
 def home_dir(group_id, owner):
-    """Codigo recogido por equipo (no por machine_id): cada recogida es una copia nueva
-    <epoch_ms>.tar.gz y no pisa a la anterior; se conservan las ultimas HOME_KEEP."""
+    """Carpeta con los <ms>.tar.gz del equipo."""
     return os.path.join(HOME_DIR, _safe_seg(group_id), _safe_seg(owner))
 
 
 def home_stamps(group_id, owner):
-    """Marcas de tiempo (epoch ms) de las copias del equipo, mas nueva primero."""
+    """Timestamps en ms, mas nuevos primero."""
     try:
         names = [n[:-7] for n in os.listdir(home_dir(group_id, owner)) if n.endswith(".tar.gz")]
     except OSError:
@@ -584,7 +555,7 @@ def home_stamps(group_id, owner):
 
 
 def home_meta_of(group_id, owner):
-    """(edad_s, bytes, team_id) de la copia mas nueva, o (None, None, None)."""
+    """(edad_s, bytes, team_id) de la ultima copia."""
     stamps = home_stamps(group_id, owner)
     if not stamps:
         return None, None, None
@@ -598,7 +569,6 @@ def home_meta_of(group_id, owner):
             os.path.getsize(os.path.join(d, stamps[0] + ".tar.gz")), team)
 
 
-# --------------------------------------------------------------------- handler
 
 class ControlHTTPServer(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
@@ -610,7 +580,6 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "contest-control/2"
     protocol_version = "HTTP/1.1"
 
-    # -- io helpers ---------------------------------------------------------
     def _send(self, code, body=b"", ctype="application/json", extra=None):
         if isinstance(body, str):
             body = body.encode("utf-8")
@@ -652,10 +621,8 @@ class Handler(BaseHTTPRequestHandler):
         return (self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
                 or self.client_address[0])
 
-    # -- auth -------------------------------------------------------------
     def _admin_scope(self, token=None):
-        """Returns (ok, scope): scope is None for superadmin, or a group_id for a
-        venue-scoped admin token. Sends the error response itself on failure."""
+        """(ok, scope): scope None = superadmin, si no el grupo del token."""
         tok = token if token is not None else self._bearer()
         if ADMIN_TOKEN and hmac.compare_digest(tok, ADMIN_TOKEN):
             return True, None
@@ -669,7 +636,7 @@ class Handler(BaseHTTPRequestHandler):
         return False, None
 
     def _scope_ok(self, scope, group_id):
-        """404 (not 403) for cross-venue access so names of other venues leak."""
+        """404 y no 403, para no revelar que sedes existen."""
         if scope is not None and scope != group_id:
             self._error(404, "not found")
             return False
@@ -683,7 +650,6 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return row
 
-    # -- routing --------------------------------------------------------
     def _route(self):
         parsed = urlparse(self.path)
         return [p for p in parsed.path.split("/") if p], parse_qs(parsed.query)
@@ -775,7 +741,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         return self.do_POST()
 
-    # -- pages / boot ---------------------------------------------------
     def _serve_file(self, path, ctype):
         try:
             with open(path, "rb") as fh:
@@ -808,8 +773,7 @@ class Handler(BaseHTTPRequestHandler):
                      hostname=excluded.hostname, ip=excluded.ip, last_seen=excluded.last_seen""",
                 (machine_id, group_id, bearer, hostname, self._client_ip(), iso(now()), iso(now())),
             )
-            # A machine reverts /etc to the squashfs on every boot, so re-push the
-            # group's persistent allowlist right after (re-)enrollment.
+            # /etc se resetea en cada arranque: reenviar la allowlist del grupo
             hosts, _ = stored_allowlist(conn, group_id)
             if hosts:
                 try:
@@ -913,9 +877,7 @@ class Handler(BaseHTTPRequestHandler):
         bound = None
         with _DB_LOCK:
             conn = db()
-            # Tiempo por programa: cada editor presente suma el intervalo desde el
-            # reporte anterior. ponytail: tope 60s (una PC offline no suma horas);
-            # mide "abierto", no "en foco".
+            # Tiempo por editor abierto (no en foco), max 60s por reporte.
             prev = conn.execute("SELECT status_at FROM machines WHERE machine_id=?",
                                 (machine_id,)).fetchone()
             gap = (since_seconds(prev["status_at"]) or 0) if prev else 0
@@ -931,8 +893,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("INSERT INTO app_usage (group_id, owner, app, secs) VALUES (?,?,?,?) "
                              "ON CONFLICT(group_id, owner, app) DO UPDATE SET secs=secs+excluded.secs",
                              (group_id, owner, str(app)[:64], dt))
-            # Historial: una sesion por programa mientras siga apareciendo en el reporte.
-            # Deja de aparecer (o la PC estuvo offline > OFFLINE_SECS) -> se cierra.
+            # Sesiones por editor: se cierran cuando deja de aparecer.
             present = [str(a)[:64] for a in apps] if isinstance(apps, dict) else []
             conn.execute("UPDATE app_sessions SET open=0 WHERE machine_id=? AND open=1 AND "
                          "(? - last_at > ? OR app NOT IN (%s))" % ",".join("?" * len(present)),
@@ -1008,7 +969,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "bytes": len(data)})
 
     def _screenshot_get(self, group_id, machine_id, query=None):
-        # <img> no manda cabeceras: se acepta ?token= además del header.
+        # <img> no manda headers, por eso ?token=
         ok, scope = self._admin_scope(token=((query or {}).get("token") or [None])[0])
         if not ok or not self._scope_ok(scope, group_id):
             return
@@ -1020,7 +981,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, data, "image/png", {"Cache-Control": "no-store"})
 
     def _shots(self, group_id, machine_id, ts, query):
-        """Historial: sin ts lista las marcas; con ts sirve esa captura (PNG)."""
+        """Sin ts lista las capturas; con ts devuelve esa."""
         ok, scope = self._admin_scope(token=((query or {}).get("token") or [None])[0])
         if not ok or not self._scope_ok(scope, group_id):
             return
@@ -1159,7 +1120,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "alert_id": aid, "duplicate": True})
         return self._json(200, {"ok": True, "alert_id": aid})
 
-    # -- admin: commands ---------------------------------------------
     def _admin_cmd(self):
         ok, scope = self._admin_scope()
         if not ok:
@@ -1184,8 +1144,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "args.hosts must be a list")
 
         if target.get("all"):
-            # Toda Bolivia (todos los grupos): solo superadmin y solo capturas; bloquear o
-            # apagar el pais entero de un clic seria demasiado peligroso.
+            # Todas las sedes: solo capturas, nada peligroso de un clic.
             if scope is not None or action != "screenshot":
                 return self._error(403, "target 'all' solo con el token superadmin y solo para 'screenshot'")
             with _DB_LOCK:
@@ -1230,7 +1189,6 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"nonce": payload_obj["nonce"], "group_id": group_id,
                                 "machine_id": machine_id, "expires_at": payload_obj["expires_at"]})
 
-    # -- admin: dashboards -----------------------------------------
     def _machine_rows(self, scope):
         rows = db().execute("SELECT * FROM machines ORDER BY group_id, machine_id").fetchall()
         alert_ct = {}
@@ -1336,7 +1294,7 @@ class Handler(BaseHTTPRequestHandler):
                 FROM commands c {where} ORDER BY c.created_at DESC LIMIT ?""", params).fetchall()
         cmds = [dict(r) for r in rows]
         if scope is not None:
-            # un coordinador de sede no debe ver la password de unlock-root (solo superadmin)
+            # ocultar la password de unlock-root al coordinador
             for c in cmds:
                 if c["action"] == "unlock-root":
                     c["args_json"] = None
@@ -1369,7 +1327,6 @@ class Handler(BaseHTTPRequestHandler):
         publish("alert.dismissed", {"id": int(alert_id), "by": who}, a["group_id"])
         return self._json(200, {"ok": True})
 
-    # -- admin: teams / bindings --------------------------------
     def _admin_teams_get(self):
         ok, scope = self._admin_scope()
         if not ok:
@@ -1431,7 +1388,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "binding": binding})
 
     def _admin_location(self, group_id, machine_id):
-        """Ubicación física manual (texto libre): 'Sala 3, PC 12', etc."""
+        """Texto libre, ej. 'Sala 3, PC 12'."""
         ok, scope = self._admin_scope()
         if not ok or not self._scope_ok(scope, group_id):
             return
@@ -1448,7 +1405,6 @@ class Handler(BaseHTTPRequestHandler):
         publish("machine.located", {"machine_id": machine_id, "location": loc}, group_id)
         return self._json(200, {"ok": True, "location": loc})
 
-    # -- admin: persistent allowlist -----------------------------
     def _admin_allowlist_get(self, query):
         ok, scope = self._admin_scope()
         if not ok:
@@ -1501,7 +1457,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "group_id": group_id, "hosts": hosts,
                                 "nonce": payload_obj["nonce"]})
 
-    # -- admin: homepage / logo entregados por el login (por sede, fallback '__global__') --
+    # homepage y logo por sede, los entrega el login
     def _admin_cfg_get(self, query, col):
         ok, scope = self._admin_scope()
         if not ok:
@@ -1543,10 +1499,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "group_id": group_id, "url": url,
                                 "updated_at": updated_at})
 
-    # -- admin: SSE + report ------------------------------------
     def _sse(self, query):
-        # EventSource can't set headers → token in the query string (header still
-        # works for curl / tests).
+        # EventSource no manda headers, por eso ?token=
         ok, scope = self._admin_scope(token=(query.get("token") or [None])[0])
         if not ok:
             return
@@ -1578,9 +1532,7 @@ class Handler(BaseHTTPRequestHandler):
                     pass
 
     def _admin_quota(self):
-        """Por sede: equipos esperados (users.json), conectados ahora y los que faltan.
-        Conectado = su usuario esta logueado en una PC que reporto en los ultimos 120s
-        (el mismo umbral 'offline' del panel). Nunca devuelve contrasenas."""
+        """Por sede: equipos esperados, conectados y faltantes (sin contrasenas)."""
         ok, scope = self._admin_scope()
         if not ok:
             return
@@ -1607,7 +1559,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"quota": out})
 
     def _admin_report(self, query):
-        # opened in a new tab → allow ?token= as well as the header.
+        # se abre en otra pestaña, por eso ?token=
         ok, scope = self._admin_scope(token=(query.get("token") or [None])[0])
         if not ok:
             return
@@ -1627,7 +1579,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, _report_html(data), "text/html; charset=utf-8")
 
     def _admin_credentials(self, query):
-        # opened in a new tab → allow ?token= as well as the header.
+        # se abre en otra pestaña, por eso ?token=
         ok, scope = self._admin_scope(token=(query.get("token") or [None])[0])
         if not ok:
             return

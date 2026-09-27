@@ -1,6 +1,5 @@
 #!/bin/sh
-# Genera el par Ed25519 con el que el servidor firma los comandos.
-# La clave privada NO sale de este host; la pública se hornea en el ISO.
+# Genera la llave Ed25519 para firmar comandos. La .pub va en la ISO.
 set -eu
 
 cd "$(dirname "$0")"

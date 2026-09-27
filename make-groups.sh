@@ -1,14 +1,6 @@
 #!/bin/sh
-# Genera groups.json para el modelo "1 ISO generico":
-#   - grupo "lobby": token bootstrap, todas las maquinas arrancan aqui.
-#   - un grupo por sede: enroll_token (lo entrega el login) + admin_token
-#     (para el coordinador de esa sede).
-#
-#   ./make-groups.sh lapaz elalto sucre cbba scz ...      -> escribe groups.json
-#
-# Imprime tambien:
-#   - la linea BOOTSTRAP para config/iso.local.conf del ISO generico
-#   - la tabla region->enrollToken para el servidor de login
+# Uso: ./make-groups.sh lapaz sucre cbba ...
+# Crea groups.json con el grupo "lobby" y un grupo por sede.
 set -eu
 
 cd "$(dirname "$0")"

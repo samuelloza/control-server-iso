@@ -208,12 +208,12 @@ def main():
             break
         call("POST", "/cmd/lab-uno/m1/ack", {"nonce": b["nonce"], "status": "ok"}, token=bearer)
 
-    # -- phase 1: long-poll returns 200 + meta on timeout (not 204) ------------
+    # phase 1: long-poll returns 200 + meta on timeout (not 204)
     t0 = time.time()
     status, body = call("GET", "/cmd/lab-uno/m1?wait=1", token=bearer)
     assert status == 200 and "meta" in body and 0.8 < time.time() - t0 < 4, (status, body)
 
-    # -- phase 1: precontest sets server-side lock_state ----------------------
+    # phase 1: precontest sets server-side lock_state
     call("POST", "/admin/cmd", {"target": {"machine_id": "m1"}, "action": "precontest"}, token="admin-secret")
     status, body = call("GET", "/admin/machines", token="admin-secret")
     m1 = next(m for m in body["machines"] if m["machine_id"] == "m1")
@@ -225,7 +225,7 @@ def main():
             break
         call("POST", "/cmd/lab-uno/m1/ack", {"nonce": b["nonce"], "status": "ok"}, token=bearer)
 
-    # -- phase 1: donottouch freezes delivery except cantouch ---------------
+    # phase 1: donottouch freezes delivery except cantouch
     call("POST", "/admin/cmd", {"target": {"machine_id": "m1"}, "action": "donottouch"}, token="admin-secret")
     s, b = call("GET", "/cmd/lab-uno/m1", token=bearer)
     assert s == 200 and b["action"] == "donottouch"
@@ -245,7 +245,7 @@ def main():
     s, nb = call("POST", "/admin/cmd", {"target": {"machine_id": "m1"}, "action": "net-open"}, token="admin-secret")
     assert s == 200, (s, nb)
 
-    # -- phase 3: status ingest + machine detail + samples ------------------
+    # phase 3: status ingest + machine detail + samples
     s, _ = call("POST", "/cmd/lab-uno/m1/status",
                 {"mem": 41.0, "ld": 0.7, "sw": 0, "hd": 55.0, "virt": "kvm", "usb": "blocked", "locked": 1},
                 token=bearer)
@@ -281,7 +281,7 @@ def main():
     s, det2 = call("GET", "/admin/machines/lab-uno/m9", token="admin-secret")
     assert det2["app_usage"].get("vim", 0) > first, (first, det2["app_usage"])
 
-    # -- phase 3: alerts: raise, machine cannot dismiss, admin can ----------
+    # phase 3: alerts: raise, machine cannot dismiss, admin can
     s, ev = call("POST", "/cmd/lab-uno/m1/events", {"kind": "usb.phone", "detail": "Pixel"}, token=bearer)
     assert s == 200 and "alert_id" in ev
     s, al = call("GET", "/admin/alerts", token="admin-secret")
@@ -295,7 +295,7 @@ def main():
     s, al = call("GET", "/admin/alerts", token="admin-secret")
     assert not any(a["id"] == aid for a in al["alerts"]), "dismissed alert must drop from open list"
 
-    # -- phase 4: per-venue scoped admin token -----------------------------
+    # phase 4: per-venue scoped admin token
     call("POST", "/enroll", {"machine_id": "d1", "group_id": "lab-dos", "enroll_token": "enroll-dos"})
     s, mine = call("GET", "/admin/machines", token="coord-dos")
     assert s == 200 and mine["scope"] == "lab-dos"
@@ -336,7 +336,7 @@ def main():
     s, all_creds = call("GET", "/admin/credentials?format=json&group=lab-uno", token="admin-secret")
     assert s == 200 and all_creds["users"][0]["password"] == "hunter2", "superadmin sees any venue"
 
-    # -- phase 5: teams + binding -----------------------------------------
+    # phase 5: teams + binding
     s, _ = call("PUT", "/admin/teams",
                 {"group_id": "lab-uno", "entries": [{"user_id": "t1", "name": "Equipo Uno", "seat": "A3"}]},
                 token="admin-secret")
@@ -349,7 +349,7 @@ def main():
     s, b = call("GET", "/cmd/lab-uno/m1?wait=0", token=bearer)
     assert b.get("meta", {}).get("binding", {}).get("name") == "Equipo Uno", b
 
-    # -- phase 6: persistent group allowlist ------------------------------
+    # phase 6: persistent group allowlist
     # only superadmin may read/save it; a venue coordinator loosening network
     # access on their own is exactly what this gate exists to prevent
     s, _ = call("PUT", "/admin/allowlist",
@@ -385,7 +385,7 @@ def main():
     s, _ = call("GET", "/admin/allowlist?group=lab-uno", token="coord-dos")
     assert s == 403, s
 
-    # -- homepage persistente: se entrega en el login, no como comando masivo --
+    # homepage persistente: se entrega en el login, no como comando masivo
     s, b = call("GET", "/admin/homepage?group=lab-uno", token="admin-secret")
     assert s == 200 and b["url"] == "https://default.example/inicio" and not b["updated_at"], (s, b)
     global_homepage = "https://contest.example/global"
@@ -409,7 +409,7 @@ def main():
     s, _ = call("GET", "/admin/homepage?group=lab-uno", token="coord-dos")
     assert s == 404, s
 
-    # -- logo por sede con fallback global; vacío elimina el override --
+    # logo por sede con fallback global; vacío elimina el override
     global_logo = "https://contest.example/global.svg"
     site_logo = "https://contest.example/lab-dos.svg"
     s, b = call("PUT", "/admin/logo",
@@ -448,14 +448,14 @@ def main():
         assert login["logoUrl"] == site_logo
     auth_httpd.shutdown()
 
-    # -- phase 5: sync HTML report ---------------------------------------
+    # phase 5: sync HTML report
     req = urllib.request.Request(BASE + "/admin/report?group=lab-uno", method="GET")
     req.add_header("Authorization", "Bearer admin-secret")
     with urllib.request.urlopen(req) as r:
         html = r.read().decode()
     assert "<h1>Reporte" in html and "m1" in html
 
-    # -- phase 6: collect-home upload / download / group zip ------------
+    # phase 6: collect-home upload / download / group zip
     import gzip as _gz
     blob = _gz.compress(b"solucion int main(){}")
     r = urllib.request.Request(BASE + "/cmd/lab-uno/m1/home", data=blob, method="POST")
@@ -486,7 +486,7 @@ def main():
     except urllib.error.HTTPError as exc:
         assert exc.code == 400, exc.code
 
-    # -- phase 7: manual location per machine --------------------------
+    # phase 7: manual location per machine
     s, b = call("PUT", "/admin/machines/lab-uno/m1/location",
                 {"location": "Sala 3, PC 12"}, token="admin-secret")
     assert s == 200 and b["location"] == "Sala 3, PC 12", (s, b)
@@ -501,7 +501,7 @@ def main():
     s, _ = call("PUT", "/admin/machines/lab-uno/m1/location", {"location": "x"}, token="coord-dos")
     assert s == 404, s
 
-    # -- phase 8: same user logged in on two machines + logout -------------
+    # phase 8: same user logged in on two machines + logout
     s, en2 = call("POST", "/enroll", {"machine_id": "m2", "group_id": "lab-uno", "enroll_token": "enroll-secret"})
     assert s == 200, (s, en2)
     bearer2 = en2["bearer"]
@@ -525,7 +525,7 @@ def main():
     s, b = call("GET", "/admin/machines", token="admin-secret")
     assert any(m["machine_id"] == "m2" for m in b["machines"]), "a fresh login must bring it back"
 
-    # -- alertas calculadas en el servidor ---------------------------------
+    # alertas calculadas en el servidor
     def enroll(mid):
         s, e = call("POST", "/enroll", {"machine_id": mid, "group_id": "lab-uno", "enroll_token": "enroll-secret"})
         assert s == 200, (s, e)
@@ -577,7 +577,7 @@ def main():
     call("POST", "/cmd/lab-uno/r5/status", {"login": {"user_id": "u_off"}}, token=b5)
     assert not has_alert("r5", "offline"), "al volver a reportar se cierra sola"
 
-    # -- historial de capturas manuales: por equipo y sobrevive al reinicio
+    # historial de capturas manuales: por equipo y sobrevive al reinicio
     b6 = enroll("s1")
     call("POST", "/cmd/lab-uno/s1/status", {"login": {"user_id": "u_shot"}}, token=b6)
     for i in range(3):   # la ISO sube el PNG; el historial queda por equipo y con tope
@@ -595,7 +595,7 @@ def main():
     with urllib.request.urlopen(BASE + f"/admin/machines/lab-uno/s2/shots/{sh['shots'][0]}?token=admin-secret") as r:
         assert r.read()[:8] == b"\x89PNG\r\n\x1a\n"
 
-    # -- cupos por sede: esperados (users.json, solo cuentas con team_id), conectados y faltantes
+    # cupos por sede: esperados (users.json, solo cuentas con team_id), conectados y faltantes
     s, qd = call("GET", "/admin/quota", token="admin-secret")
     assert s == 200, (s, qd)
     q = {x["group_id"]: x for x in qd["quota"]}
@@ -606,7 +606,7 @@ def main():
     s, qc = call("GET", "/admin/quota", token="coord-dos")
     assert [x["group_id"] for x in qc["quota"]] == ["lab-dos"], "un coordinador solo ve su sede"
 
-    # -- captura de toda Bolivia: solo superadmin y solo 'screenshot'
+    # captura de toda Bolivia: solo superadmin y solo 'screenshot'
     s, r = call("POST", "/admin/cmd", {"target": {"all": True}, "action": "screenshot"}, token="admin-secret")
     assert s == 200 and {"lab-uno", "lab-dos"} <= set(r["groups"]), (s, r)
     s, _ = call("POST", "/admin/cmd", {"target": {"all": True}, "action": "screenshot"}, token="coord-dos")
