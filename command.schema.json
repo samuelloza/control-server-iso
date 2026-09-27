@@ -4,7 +4,7 @@
   "description": "Canonical UTF-8 JSON (sorted keys, no spaces, trailing \\n), Ed25519-signed. The signature covers the exact bytes; verify before parsing, the same way overlay/usr/lib/contest/update.sh verifies the update manifest.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["action", "args", "expires_at", "group_id", "issued_at", "machine_id", "nonce", "server"],
+  "required": ["action", "args", "expires_at", "group_id", "issued_at", "machine_id", "nonce"],
   "properties": {
     "action": {
       "type": "string",
@@ -28,7 +28,6 @@
       "pattern": "^[A-Za-z0-9_-]{22}$"
     },
     "issued_at": { "type": "string", "format": "date-time" },
-    "expires_at": { "type": "string", "format": "date-time" },
-    "server": { "type": "string" }
+    "expires_at": { "type": "string", "format": "date-time" }
   }
 }

@@ -14,10 +14,8 @@ control-server), asi no se duplica. Solo stdlib.
 Env:
   AUTH_BIND    (0.0.0.0:6666)
   AUTH_USERS   (./users.json)     credenciales  (gitignored)
-  AUTH_GROUPS  (./groups.json)    region -> enroll_token
   AUTH_DB      (./data/control.db) homepage y logo administrados por sede
   AUTH_DEFAULT_HOMEPAGE (file:///usr/share/doc/contest/index.html)
-  AUTH_LOG     (./data/auth-events.txt)
 """
 import hmac
 import json
@@ -30,8 +28,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIND = os.environ.get("AUTH_BIND", "0.0.0.0:6666")
 USERS_FILE = os.environ.get("AUTH_USERS", os.path.join(HERE, "users.json"))
-GROUPS_FILE = os.environ.get("AUTH_GROUPS", os.path.join(HERE, "groups.json"))
-LOG_FILE = os.environ.get("AUTH_LOG", os.path.join(HERE, "data", "auth-events.txt"))
+GROUPS_FILE = os.path.join(HERE, "groups.json")
+LOG_FILE = os.path.join(HERE, "data", "auth-events.txt")
 DB_FILE = os.environ.get("AUTH_DB", os.path.join(HERE, "data", "control.db"))
 DEFAULT_HOMEPAGE = os.environ.get(
     "AUTH_DEFAULT_HOMEPAGE", "file:///usr/share/doc/contest/index.html")
@@ -58,9 +56,7 @@ def regions():
     for gid, rec in load_json(GROUPS_FILE, {}).items():
         if gid.startswith("_") or gid == "lobby":
             continue
-        if isinstance(rec, str):
-            out[gid] = {"name": gid, "enroll_token": rec}
-        elif isinstance(rec, dict):
+        if isinstance(rec, dict):
             out[gid] = {"name": str(rec.get("label", gid)),
                         "enroll_token": str(rec.get("enroll_token", ""))}
     return out
@@ -70,32 +66,23 @@ def sanitize_team(v):
     return TEAM_ID_RE.sub("-", str(v or ""))[:64] or "equipo"
 
 
+def cfg_for(col, region_id, default):
+    """homepage o logo_url de la sede, con fallback a '__global__' y luego a default."""
+    if not os.path.exists(DB_FILE):
+        return default
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            row = conn.execute(
+                f"SELECT {col} FROM group_config WHERE group_id IN (?, '__global__') "
+                f"AND {col} <> '' ORDER BY group_id='__global__' LIMIT 1",
+                (region_id,)).fetchone()
+        return row[0] if row and row[0] else default
+    except sqlite3.Error:
+        return default
+
+
 def homepage_for(region_id):
-    if not os.path.exists(DB_FILE):
-        return DEFAULT_HOMEPAGE
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            row = conn.execute(
-                "SELECT homepage FROM group_config WHERE group_id IN (?, '__global__') "
-                "AND homepage <> '' ORDER BY group_id='__global__' LIMIT 1",
-                (region_id,)).fetchone()
-        return row[0] if row and row[0] else DEFAULT_HOMEPAGE
-    except sqlite3.Error:
-        return DEFAULT_HOMEPAGE
-
-
-def logo_for(region_id):
-    if not os.path.exists(DB_FILE):
-        return ""
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            row = conn.execute(
-                "SELECT logo_url FROM group_config WHERE group_id IN (?, '__global__') "
-                "AND logo_url <> '' ORDER BY group_id='__global__' LIMIT 1",
-                (region_id,)).fetchone()
-        return row[0] if row else ""
-    except sqlite3.Error:
-        return ""
+    return cfg_for("homepage", region_id, DEFAULT_HOMEPAGE)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -155,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
             "userId": username,
             "displayName": str(rec.get("display") or rec.get("team_name") or username),
             "homepage": homepage_for(region_id),
-            "logoUrl": logo_for(region_id),
+            "logoUrl": cfg_for("logo_url", region_id, ""),
             "team": {
                 "id": sanitize_team(rec.get("team_id") or username),
                 "name": str(rec.get("team_name") or rec.get("display") or username),

@@ -121,7 +121,7 @@ firmado con la privada Ed25519. Esquema en `command.schema.json`. Ejemplo de los
 bytes que se firman:
 
 ```
-{"action":"message","args":{"text":"hola equipo"},"expires_at":"2026-09-06T13:00:00Z","group_id":"lab-uno","issued_at":"2026-09-06T12:00:00Z","machine_id":"m1","nonce":"a5Yk...","server":"control.codi.com.bo"}
+{"action":"message","args":{"text":"hola equipo"},"expires_at":"2026-09-06T13:00:00Z","group_id":"lab-uno","issued_at":"2026-09-06T12:00:00Z","machine_id":"m1","nonce":"a5Yk..."}
 ```
 
 El cliente en el ISO debe, con `keys/command-signing.pub` horneada:

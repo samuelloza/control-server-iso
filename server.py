@@ -10,6 +10,7 @@ Test: python3 test_server.py
 """
 import base64
 import hmac
+import html
 import json
 import os
 import queue
@@ -41,30 +42,29 @@ BRAND_LOGO_SVG = os.path.join(HERE, "icpc-bolivia-logo.svg")
 BRAND_WALLPAPER_SVG = os.path.join(HERE, "icpc-bolivia-wallpaper.svg")
 BIND = os.environ.get("CONTROL_BIND", "127.0.0.1:8090")
 ADMIN_TOKEN = os.environ.get("CONTROL_ADMIN_TOKEN", "")
-SERVER_NAME = os.environ.get("CONTROL_SERVER_NAME", "control")
 DEFAULT_HOMEPAGE = os.environ.get(
     "AUTH_DEFAULT_HOMEPAGE", "file:///usr/share/doc/contest/index.html")
 COMMAND_TTL_SECONDS = int(os.environ.get("CONTROL_COMMAND_TTL", "3600"))
-LONGPOLL_MAX = int(os.environ.get("CONTROL_LONGPOLL_MAX", "30"))
-SAMPLES_PER_MACHINE = int(os.environ.get("CONTROL_SAMPLES_MAX", "400"))
-JOURNAL_BYTES_PER_MACHINE = int(os.environ.get("CONTROL_JOURNAL_MAX", "65536"))
+LONGPOLL_MAX = 30
+SAMPLES_PER_MACHINE = 400
+JOURNAL_BYTES_PER_MACHINE = 65536
 SCREENSHOT_DIR = _env_path("CONTROL_SCREENSHOT_DIR", "data/screenshots")
-SCREENSHOT_MAX_BYTES = int(os.environ.get("CONTROL_SCREENSHOT_MAX", str(6 * 1024 * 1024)))
+SCREENSHOT_MAX_BYTES = 6 * 1024 * 1024
 # 'collect-home': tar.gz del home de cada equipo, para juntar el código al final.
 HOME_DIR = _env_path("CONTROL_HOME_DIR", "data/homes")
-HOME_MAX_BYTES = int(os.environ.get("CONTROL_HOME_MAX", str(400 * 1024 * 1024)))
-HOME_KEEP = int(os.environ.get("CONTROL_HOME_KEEP", "10"))       # copias de codigo por equipo
+HOME_MAX_BYTES = 400 * 1024 * 1024
+HOME_KEEP = 10       # copias de codigo por equipo
 PHASES = ("idle", "practice", "live", "frozen", "ended")
 # Alertas calculadas en el servidor con los datos que ya llegan (sin tocar la ISO).
-OFFLINE_SECS = int(os.environ.get("CONTROL_OFFLINE_SECS", "90"))   # sin reportar -> offline
+OFFLINE_SECS = 90    # sin reportar -> offline
 OFFLINE_PHASES = ("practice", "live", "frozen")                    # solo vigilamos en concurso
 DISK_FULL_PCT = 95
 STATUS_EVERY = 30   # las PCs reportan estado cada ~29s (medido en samples)
 # Historial de capturas manuales en disco, por equipo (sobrevive reinicios).
-SHOT_KEEP = int(os.environ.get("CONTROL_SHOT_KEEP", "20"))       # ultimas N por equipo
+SHOT_KEEP = 20       # ultimas N por equipo
 
 MACHINE_ID_RE = "[A-Za-z0-9._-]{1,64}"
-_MID_OK = re.compile(r"\A[A-Za-z0-9._-]{1,64}\Z").match
+_MID_OK = re.compile(r"\A%s\Z" % MACHINE_ID_RE).match
 
 # action -> required arg keys. Anything not listed here is rejected.
 # 'precontest', 'donottouch', 'cantouch', 'net-open', 'net-lock' are macros /
@@ -220,34 +220,17 @@ def db():
             );
             """
         )
-        try:
-            _conn.execute("ALTER TABLE group_config ADD COLUMN phase TEXT NOT NULL DEFAULT 'idle'")
-        except sqlite3.OperationalError:
-            pass  # ya existe
-        try:
-            _conn.execute("ALTER TABLE group_config ADD COLUMN homepage TEXT")
-        except sqlite3.OperationalError:
-            pass  # ya existe
-        try:
-            _conn.execute("ALTER TABLE group_config ADD COLUMN homepage_updated_at TEXT")
-        except sqlite3.OperationalError:
-            pass  # ya existe
-        try:
-            _conn.execute("ALTER TABLE group_config ADD COLUMN logo_url TEXT")
-        except sqlite3.OperationalError:
-            pass  # ya existe
-        try:
-            _conn.execute("ALTER TABLE group_config ADD COLUMN logo_updated_at TEXT")
-        except sqlite3.OperationalError:
-            pass  # ya existe
-        try:
-            _conn.execute("ALTER TABLE machines ADD COLUMN location TEXT")
-        except sqlite3.OperationalError:
-            pass  # ya existe
-        try:
-            _conn.execute("ALTER TABLE machines ADD COLUMN hidden_at TEXT")
-        except sqlite3.OperationalError:
-            pass  # ya existe
+        for table, col in (("group_config", "phase TEXT NOT NULL DEFAULT 'idle'"),
+                           ("group_config", "homepage TEXT"),
+                           ("group_config", "homepage_updated_at TEXT"),
+                           ("group_config", "logo_url TEXT"),
+                           ("group_config", "logo_updated_at TEXT"),
+                           ("machines", "location TEXT"),
+                           ("machines", "hidden_at TEXT")):
+            try:
+                _conn.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass  # ya existe
     return _conn
 
 
@@ -292,10 +275,7 @@ def sign(payload: bytes) -> str:
 
 
 def group_records():
-    """{group_id: {"enroll_token": str, "admin_token": str|None, "label": str}}.
-
-    Accepts the legacy shape {group_id: "enroll-token"} too.
-    """
+    """{group_id: {"enroll_token": str, "admin_token": str|None, "label": str}}."""
     try:
         with open(GROUPS_FILE, "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -307,9 +287,7 @@ def group_records():
     for gid, rec in data.items():
         if gid.startswith("_"):
             continue
-        if isinstance(rec, str):
-            out[str(gid)] = {"enroll_token": rec, "admin_token": None, "label": str(gid)}
-        elif isinstance(rec, dict):
+        if isinstance(rec, dict):
             out[str(gid)] = {
                 "enroll_token": str(rec.get("enroll_token", "")),
                 "admin_token": (str(rec["admin_token"]) if rec.get("admin_token") else None),
@@ -402,7 +380,7 @@ def enqueue_command(conn, group_id, machine_id, action, args, ttl=None):
     payload_obj = {
         "action": action, "args": args, "expires_at": iso(expires),
         "group_id": group_id, "issued_at": iso(issued), "machine_id": machine_id,
-        "nonce": new_nonce(), "server": SERVER_NAME,
+        "nonce": new_nonce(),
     }
     payload = canonical(payload_obj)
     if len(payload) > MAX_PAYLOAD_BYTES:
@@ -507,15 +485,15 @@ def stored_phase(conn, group_id):
     return row["phase"] if row else "idle"
 
 
-def stored_homepage(conn, group_id):
-    row = conn.execute("SELECT homepage, homepage_updated_at FROM group_config WHERE group_id=?",
+def stored_cfg(conn, group_id, col):
+    """(propio, efectivo con fallback a '__global__', updated_at) para homepage o logo_url."""
+    ts = "homepage_updated_at" if col == "homepage" else "logo_updated_at"
+    row = conn.execute(f"SELECT {col}, {ts} FROM group_config WHERE group_id=?",
                        (group_id,)).fetchone()
     fallback = conn.execute(
-        "SELECT homepage FROM group_config WHERE group_id='__global__'").fetchone()
-    own = (row["homepage"] or "") if row else ""
-    default = (fallback["homepage"] or "") if fallback else ""
-    return (own or default or DEFAULT_HOMEPAGE,
-            row["homepage_updated_at"] if row else None)
+        f"SELECT {col} FROM group_config WHERE group_id='__global__'").fetchone()
+    own = (row[col] or "") if row else ""
+    return own, own or ((fallback[col] or "") if fallback else ""), row[ts] if row else None
 
 
 def valid_homepage(url):
@@ -523,16 +501,6 @@ def valid_homepage(url):
     return ((parsed.scheme in ("http", "https") and bool(parsed.netloc))
             or url.startswith("file:///usr/share/doc/contest/")
             or url == "about:blank")
-
-
-def stored_logo(conn, group_id):
-    row = conn.execute("SELECT logo_url, logo_updated_at FROM group_config WHERE group_id=?",
-                       (group_id,)).fetchone()
-    own = (row["logo_url"] or "") if row else ""
-    fallback = conn.execute(
-        "SELECT logo_url FROM group_config WHERE group_id='__global__'").fetchone()
-    effective = own or ((fallback["logo_url"] or "") if fallback else "")
-    return own, effective, row["logo_updated_at"] if row else None
 
 
 def valid_logo_url(url):
@@ -631,10 +599,6 @@ def home_meta_of(group_id, owner):
             os.path.getsize(os.path.join(d, stamps[0] + ".tar.gz")), team)
 
 
-def home_age_of(group_id, owner):
-    return home_meta_of(group_id, owner)[0]
-
-
 # --------------------------------------------------------------------- handler
 
 class ControlHTTPServer(ThreadingHTTPServer):
@@ -689,9 +653,6 @@ class Handler(BaseHTTPRequestHandler):
         return (self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
                 or self.client_address[0])
 
-    def log_message(self, fmt, *args):
-        super().log_message(fmt, *args)
-
     # -- auth -------------------------------------------------------------
     def _admin_scope(self, token=None):
         """Returns (ok, scope): scope is None for superadmin, or a group_id for a
@@ -731,11 +692,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p, q = self._route()
         if p in ([], ["index.html"]):
-            return self._serve_index()
+            return self._serve_file(INDEX_HTML, "text/html; charset=utf-8")
         if p == ["icpc-bolivia-logo.svg"]:
-            return self._serve_brand_logo()
+            return self._serve_file(BRAND_LOGO_SVG, "image/svg+xml")
         if p == ["icpc-bolivia-wallpaper.svg"]:
-            return self._serve_brand_wallpaper()
+            return self._serve_file(BRAND_WALLPAPER_SVG, "image/svg+xml")
         if p == ["healthz"]:
             return self._json(200, {"ok": True})
         if p == ["admin", "machines"]:
@@ -749,9 +710,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == ["admin", "allowlist"]:
             return self._admin_allowlist_get(q)
         if p == ["admin", "homepage"]:
-            return self._admin_homepage_get(q)
+            return self._admin_cfg_get(q, "homepage")
         if p == ["admin", "logo"]:
-            return self._admin_logo_get(q)
+            return self._admin_cfg_get(q, "logo_url")
         if p == ["admin", "phase"]:
             return self._admin_phase_get(q)
         if p == ["admin", "events"]:
@@ -803,9 +764,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == ["admin", "allowlist"]:
             return self._admin_allowlist_put()
         if p == ["admin", "homepage"]:
-            return self._admin_homepage_put()
+            return self._admin_cfg_put("homepage")
         if p == ["admin", "logo"]:
-            return self._admin_logo_put()
+            return self._admin_cfg_put("logo_url")
         if len(p) == 5 and p[0] == "admin" and p[1] == "machines" and p[4] == "binding":
             return self._admin_binding(p[2], p[3])
         if len(p) == 5 and p[0] == "admin" and p[1] == "machines" and p[4] == "location":
@@ -816,26 +777,12 @@ class Handler(BaseHTTPRequestHandler):
         return self.do_POST()
 
     # -- pages / boot ---------------------------------------------------
-    def _serve_index(self):
+    def _serve_file(self, path, ctype):
         try:
-            with open(INDEX_HTML, "rb") as fh:
-                self._send(200, fh.read(), "text/html; charset=utf-8")
+            with open(path, "rb") as fh:
+                self._send(200, fh.read(), ctype)
         except FileNotFoundError:
-            self._error(404, "index.html missing")
-
-    def _serve_brand_logo(self):
-        try:
-            with open(BRAND_LOGO_SVG, "rb") as fh:
-                self._send(200, fh.read(), "image/svg+xml")
-        except FileNotFoundError:
-            self._error(404, "logo missing")
-
-    def _serve_brand_wallpaper(self):
-        try:
-            with open(BRAND_WALLPAPER_SVG, "rb") as fh:
-                self._send(200, fh.read(), "image/svg+xml")
-        except FileNotFoundError:
-            self._error(404, "wallpaper missing")
+            self._error(404, os.path.basename(path) + " missing")
 
     def _enroll(self):
         body = self._read_json()
@@ -891,6 +838,9 @@ class Handler(BaseHTTPRequestHandler):
                 fresh = conn.execute("SELECT lock_state, frozen, binding_json FROM machines WHERE machine_id=?",
                                      (machine_id,)).fetchone()
                 frozen = fresh["frozen"]
+                meta = {"lock_state": fresh["lock_state"], "frozen": frozen,
+                        "phase": stored_phase(conn, group_id),
+                        "binding": json.loads(fresh["binding_json"]) if fresh["binding_json"] else None}
                 cmd = conn.execute(
                     f"""SELECT nonce, payload, signature, action FROM commands
                        WHERE group_id=? AND (machine_id=? OR machine_id='*')
@@ -908,9 +858,6 @@ class Handler(BaseHTTPRequestHandler):
                            ON CONFLICT(nonce, machine_id) DO UPDATE SET delivered_at=excluded.delivered_at""",
                         (cmd["nonce"], machine_id, iso(now())),
                     )
-                    meta = {"lock_state": fresh["lock_state"], "frozen": frozen,
-                            "phase": stored_phase(conn, group_id),
-                            "binding": json.loads(fresh["binding_json"]) if fresh["binding_json"] else None}
             if cmd:
                 return self._json(200, {
                     "nonce": cmd["nonce"], "action": cmd["action"],
@@ -920,10 +867,6 @@ class Handler(BaseHTTPRequestHandler):
                 })
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                with _DB_LOCK:
-                    phase = stored_phase(db(), group_id)
-                meta = {"lock_state": fresh["lock_state"], "frozen": frozen, "phase": phase,
-                        "binding": json.loads(fresh["binding_json"]) if fresh["binding_json"] else None}
                 return self._send(200, json.dumps({"meta": meta}), "application/json") \
                     if wait else self._send(204, b"")
             with _CMD_COND:
@@ -1068,9 +1011,7 @@ class Handler(BaseHTTPRequestHandler):
     def _screenshot_get(self, group_id, machine_id, query=None):
         # <img> no manda cabeceras: se acepta ?token= además del header.
         ok, scope = self._admin_scope(token=((query or {}).get("token") or [None])[0])
-        if not ok:
-            return
-        if not self._scope_ok(scope, group_id):
+        if not ok or not self._scope_ok(scope, group_id):
             return
         try:
             with open(screenshot_path(machine_id), "rb") as fh:
@@ -1095,12 +1036,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, fh.read(), "image/png", {"Cache-Control": "max-age=3600"})
         except FileNotFoundError:
             return self._error(404, "sin captura")
-
-    def _home_meta(self, group_id, machine_id):
-        """(age_seconds, size_bytes, team_id) o (None, None, None) si no hay."""
-        with _DB_LOCK:
-            owner = shot_owner(db(), machine_id)
-        return home_meta_of(group_id, owner)
 
     def _home_upload(self, group_id, machine_id):
         if not self._auth_machine(group_id, machine_id):
@@ -1132,9 +1067,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _home_get(self, group_id, machine_id, query=None):
         ok, scope = self._admin_scope(token=((query or {}).get("token") or [None])[0])
-        if not ok:
-            return
-        if not self._scope_ok(scope, group_id):
+        if not ok or not self._scope_ok(scope, group_id):
             return
         with _DB_LOCK:
             owner = shot_owner(db(), machine_id)
@@ -1152,9 +1085,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _homes_zip(self, group_id, query=None):
         ok, scope = self._admin_scope(token=((query or {}).get("token") or [None])[0])
-        if not ok:
-            return
-        if not self._scope_ok(scope, group_id):
+        if not ok or not self._scope_ok(scope, group_id):
             return
         import io
         import zipfile
@@ -1326,8 +1257,8 @@ class Handler(BaseHTTPRequestHandler):
                 "virt": st.get("virt"), "usb": st.get("usb"),
                 "editors": st.get("editors") or {},
                 "status_age": since_seconds(r["status_at"]),
-                "home_age": home_age_of(r["group_id"], (json.loads(r["binding_json"] or "{}").get("user_id"))
-                                        or r["machine_id"]),
+                "home_age": home_meta_of(r["group_id"], (json.loads(r["binding_json"] or "{}").get("user_id"))
+                                         or r["machine_id"])[0],
             })
         return out
 
@@ -1342,9 +1273,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _admin_machine_detail(self, group_id, machine_id):
         ok, scope = self._admin_scope()
-        if not ok:
-            return
-        if not self._scope_ok(scope, group_id):
+        if not ok or not self._scope_ok(scope, group_id):
             return
         conn = db()
         m = conn.execute("SELECT * FROM machines WHERE machine_id=? AND group_id=?",
@@ -1376,7 +1305,7 @@ class Handler(BaseHTTPRequestHandler):
             shot_age = int(time.time() - os.path.getmtime(screenshot_path(machine_id)))
         except OSError:
             shot_age = None
-        home_age, home_size, home_team = self._home_meta(group_id, machine_id)
+        home_age, home_size, home_team = home_meta_of(group_id, owner)
         return self._json(200, {
             "machine_id": machine_id, "group_id": group_id,
             "status": json.loads(m["status_json"]) if m["status_json"] else None,
@@ -1478,9 +1407,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _admin_binding(self, group_id, machine_id):
         ok, scope = self._admin_scope()
-        if not ok:
-            return
-        if not self._scope_ok(scope, group_id):
+        if not ok or not self._scope_ok(scope, group_id):
             return
         body = self._read_json() or {}
         with _DB_LOCK:
@@ -1507,9 +1434,7 @@ class Handler(BaseHTTPRequestHandler):
     def _admin_location(self, group_id, machine_id):
         """Ubicación física manual (texto libre): 'Sala 3, PC 12', etc."""
         ok, scope = self._admin_scope()
-        if not ok:
-            return
-        if not self._scope_ok(scope, group_id):
+        if not ok or not self._scope_ok(scope, group_id):
             return
         body = self._read_json() or {}
         loc = str(body.get("location", "")).strip()[:200] if isinstance(body, dict) else ""
@@ -1531,11 +1456,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if scope is not None:
             return self._error(403, "allowlist persistente: solo con el token superadmin")
-        group_id = (query.get("group") or [scope or ""])[0]
+        group_id = (query.get("group") or [""])[0]
         if not group_id:
             return self._error(400, "group required")
-        if not self._scope_ok(scope, group_id):
-            return
         hosts, updated_at = stored_allowlist(db(), group_id)
         return self._json(200, {"group_id": group_id, "hosts": hosts, "updated_at": updated_at})
 
@@ -1548,11 +1471,9 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         if not isinstance(body, dict) or not isinstance(body.get("hosts"), list):
             return self._error(400, "expected {group_id, hosts:[...]}")
-        group_id = str(body.get("group_id", "")) or scope
+        group_id = str(body.get("group_id", ""))
         if not group_id:
             return self._error(400, "group_id required")
-        if not self._scope_ok(scope, group_id):
-            return
         hosts, seen = [], set()
         for h in body["hosts"]:
             h = str(h).strip()
@@ -1581,18 +1502,22 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "group_id": group_id, "hosts": hosts,
                                 "nonce": payload_obj["nonce"]})
 
-    # -- admin: homepage entregada por el login -------------------
-    def _admin_homepage_get(self, query):
+    # -- admin: homepage / logo entregados por el login (por sede, fallback '__global__') --
+    def _admin_cfg_get(self, query, col):
         ok, scope = self._admin_scope()
         if not ok:
             return
         group_id = (query.get("group") or [scope or "__global__"])[0]
         if not self._scope_ok(scope, group_id):
             return
-        url, updated_at = stored_homepage(db(), group_id)
-        return self._json(200, {"group_id": group_id, "url": url, "updated_at": updated_at})
+        own, effective, updated_at = stored_cfg(db(), group_id, col)
+        if col == "homepage":
+            return self._json(200, {"group_id": group_id, "url": effective or DEFAULT_HOMEPAGE,
+                                    "updated_at": updated_at})
+        return self._json(200, {"group_id": group_id, "url": own, "effective_url": effective,
+                                "inherited": not own and bool(effective), "updated_at": updated_at})
 
-    def _admin_homepage_put(self):
+    def _admin_cfg_put(self, col):
         ok, scope = self._admin_scope()
         if not ok:
             return
@@ -1603,56 +1528,19 @@ class Handler(BaseHTTPRequestHandler):
         url = str(body.get("url", "")).strip()
         if not self._scope_ok(scope, group_id):
             return
-        if not valid_homepage(url):
+        if col == "homepage" and not valid_homepage(url):
             return self._error(400, "url must be http(s), about:blank or local contest documentation")
-        updated_at = iso(now())
-        with _DB_LOCK:
-            db().execute(
-                """INSERT INTO group_config (group_id, homepage, homepage_updated_at) VALUES (?,?,?)
-                   ON CONFLICT(group_id) DO UPDATE SET
-                     homepage=excluded.homepage, homepage_updated_at=excluded.homepage_updated_at""",
-                (group_id, url, updated_at))
-        publish("homepage.changed", {"group_id": group_id, "url": url},
-                None if group_id == "__global__" else group_id)
-        return self._json(200, {"ok": True, "group_id": group_id, "url": url,
-                                "updated_at": updated_at})
-
-    # -- admin: logo SVG aplicado en el próximo login -------------
-    def _admin_logo_get(self, query):
-        ok, scope = self._admin_scope()
-        if not ok:
-            return
-        group_id = (query.get("group") or [scope or "__global__"])[0]
-        if not self._scope_ok(scope, group_id):
-            return
-        url, effective_url, updated_at = stored_logo(db(), group_id)
-        return self._json(200, {"group_id": group_id, "url": url,
-                                "effective_url": effective_url,
-                                "inherited": not url and bool(effective_url),
-                                "updated_at": updated_at})
-
-    def _admin_logo_put(self):
-        ok, scope = self._admin_scope()
-        if not ok:
-            return
-        body = self._read_json()
-        if not isinstance(body, dict):
-            return self._error(400, "expected {group_id, url}")
-        group_id = str(body.get("group_id", "")) or scope or "__global__"
-        url = str(body.get("url", "")).strip()
-        if not self._scope_ok(scope, group_id):
-            return
-        if not valid_logo_url(url):
+        if col == "logo_url" and not valid_logo_url(url):
             return self._error(400, "logo url must be http(s)")
+        ts = "homepage_updated_at" if col == "homepage" else "logo_updated_at"
         updated_at = iso(now())
         with _DB_LOCK:
             db().execute(
-                """INSERT INTO group_config (group_id, logo_url, logo_updated_at) VALUES (?,?,?)
-                   ON CONFLICT(group_id) DO UPDATE SET
-                     logo_url=excluded.logo_url, logo_updated_at=excluded.logo_updated_at""",
+                f"""INSERT INTO group_config (group_id, {col}, {ts}) VALUES (?,?,?)
+                    ON CONFLICT(group_id) DO UPDATE SET {col}=excluded.{col}, {ts}=excluded.{ts}""",
                 (group_id, url, updated_at))
-        publish("logo.changed", {"group_id": group_id, "url": url},
-                None if group_id == "__global__" else group_id)
+        publish("homepage.changed" if col == "homepage" else "logo.changed",
+                {"group_id": group_id, "url": url}, None if group_id == "__global__" else group_id)
         return self._json(200, {"ok": True, "group_id": group_id, "url": url,
                                 "updated_at": updated_at})
 
@@ -1727,9 +1615,7 @@ class Handler(BaseHTTPRequestHandler):
         group_id = (query.get("group") or [scope or ""])[0]
         if scope and group_id != scope:
             return self._error(404, "not found")
-        machines = self._machine_rows(scope or (group_id or None))
-        if group_id:
-            machines = [m for m in machines if m["group_id"] == group_id]
+        machines = self._machine_rows(group_id or None)
         conn = db()
         where = "WHERE group_id=?" if group_id else ""
         params = [group_id] if group_id else []
@@ -1757,9 +1643,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, _credentials_html(group_id, users), "text/html; charset=utf-8")
 
 
+def esc(x):
+    return html.escape("" if x is None else str(x))
+
+
 def _report_html(d):
-    def esc(x):
-        return (str(x) if x is not None else "").replace("&", "&amp;").replace("<", "&lt;")
     rows = "".join(
         f"<tr><td>{esc(m['machine_id'])}</td><td>{esc(m['group_id'])}</td>"
         f"<td>{esc(m['binding'] and m['binding'].get('name'))}</td>"
@@ -1782,8 +1670,6 @@ td,th{{border:1px solid #ccc;padding:.3rem .5rem;text-align:left}}</style>
 
 
 def _credentials_html(group_id, users):
-    def esc(x):
-        return (str(x) if x is not None else "").replace("&", "&amp;").replace("<", "&lt;")
     cards = "".join(
         f"""<div class="card">
           <img class="logo" src="https://icpcbolivia.org/brand/logo_icpc_bolivia_trimmed.png" alt="">

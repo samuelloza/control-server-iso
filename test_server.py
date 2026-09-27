@@ -28,7 +28,7 @@ subprocess.run(["openssl", "pkey", "-in", KEY, "-pubout", "-out", PUB], check=Tr
 with open(os.path.join(TMP, "groups.json"), "w") as fh:
     json.dump({
         "_comment": "ignored",
-        "lab-uno": "enroll-secret",
+        "lab-uno": {"enroll_token": "enroll-secret", "admin_token": None},
         "lab-dos": {"enroll_token": "enroll-dos", "admin_token": "coord-dos", "label": "Sede Dos"},
     }, fh)
 
@@ -48,7 +48,6 @@ os.environ.update(
     CONTROL_GROUP_TOKENS=os.path.join(TMP, "groups.json"),
     AUTH_USERS=os.path.join(TMP, "users.json"),
     CONTROL_ADMIN_TOKEN="admin-secret",
-    CONTROL_SERVER_NAME="test-control",
     CONTROL_BIND="127.0.0.1:0",
     AUTH_DEFAULT_HOMEPAGE="https://default.example/inicio",
 )
@@ -171,7 +170,7 @@ def main():
     assert parsed["action"] == "message"
     assert parsed["args"]["text"] == "hola equipo"
     assert parsed["machine_id"] == "m1"
-    assert parsed["server"] == "test-control"
+    assert "server" not in parsed
     assert payload_bytes.endswith(b"\n")
     # canonical: byte-for-byte reproducible
     assert server.canonical(parsed) == payload_bytes
@@ -428,7 +427,7 @@ def main():
                 {"group_id": "lab-dos", "url": "file:///etc/passwd"}, token="coord-dos")
     assert s == 400, s
 
-    users = os.path.join(TMP, "users.json")
+    users = os.path.join(TMP, "auth-users.json")
     with open(users, "w") as fh:
         json.dump({"team": {"password": "secret", "region": "lab-dos"}}, fh)
     spec = importlib.util.spec_from_file_location(
