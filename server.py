@@ -6,17 +6,20 @@ CONTROL_ADMIN_TOKEN=... python3 server.py
 import base64
 import hmac
 import html
+import ipaddress
 import json
 import os
 import queue
 import re
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import zipfile
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -570,6 +573,13 @@ def home_meta_of(group_id, owner):
 
 
 
+def client_ip(peer, xff):
+    """X-Forwarded-For solo si la conexion viene del proxy (red privada o loopback).
+    Se toma la ultima IP: es la que agrega el proxy; las anteriores las pone el cliente."""
+    fwd = xff.split(",")[-1].strip()
+    return fwd if fwd and ipaddress.ip_address(peer).is_private else peer
+
+
 class ControlHTTPServer(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         if not isinstance(sys.exc_info()[1], ConnectionResetError):
@@ -592,15 +602,38 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _send_file(self, fh, ctype, extra=None):
+        """Manda un archivo abierto por partes, sin cargarlo entero en memoria."""
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(os.fstat(fh.fileno()).st_size))
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            fh.seek(0)
+            shutil.copyfileobj(fh, self.wfile)
+
     def _json(self, code, obj):
         self._send(code, json.dumps(obj), "application/json")
 
     def _error(self, code, message):
         self._json(code, {"error": message})
 
+    def _length(self, limit):
+        """Content-Length valido y <= limit, o None (y se cierra la conexion: el body queda sin leer)."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if 0 < length <= limit:
+            return length
+        self.close_connection = True
+        return None
+
     def _read_json(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > MAX_BODY_BYTES:
+        length = self._length(MAX_BODY_BYTES)
+        if length is None:
             return None
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
@@ -608,8 +641,8 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def _read_text(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > MAX_BODY_BYTES:
+        length = self._length(MAX_BODY_BYTES)
+        if length is None:
             return ""
         return self.rfile.read(length).decode("utf-8", "replace")
 
@@ -618,8 +651,7 @@ class Handler(BaseHTTPRequestHandler):
         return h[7:] if h.startswith("Bearer ") else ""
 
     def _client_ip(self):
-        return (self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-                or self.client_address[0])
+        return client_ip(self.client_address[0], self.headers.get("X-Forwarded-For", ""))
 
     def _admin_scope(self, token=None):
         """(ok, scope): scope None = superadmin, si no el grupo del token."""
@@ -946,8 +978,8 @@ class Handler(BaseHTTPRequestHandler):
     def _screenshot_upload(self, group_id, machine_id):
         if not self._auth_machine(group_id, machine_id):
             return self._error(401, "enroll first / bad bearer")
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > SCREENSHOT_MAX_BYTES:
+        length = self._length(SCREENSHOT_MAX_BYTES)
+        if length is None:
             return self._error(413, "captura vacía o demasiado grande")
         data = self.rfile.read(length)
         if data[:8] != b"\x89PNG\r\n\x1a\n":
@@ -1000,11 +1032,12 @@ class Handler(BaseHTTPRequestHandler):
     def _home_upload(self, group_id, machine_id):
         if not self._auth_machine(group_id, machine_id):
             return self._error(401, "enroll first / bad bearer")
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > HOME_MAX_BYTES:
+        length = self._length(HOME_MAX_BYTES)
+        if length is None:
             return self._error(413, "home vacío o demasiado grande")
-        data = self.rfile.read(length)
-        if data[:2] != b"\x1f\x8b":
+        head = self.rfile.read(2)
+        if head != b"\x1f\x8b":
+            self.close_connection = True
             return self._error(400, "se esperaba gzip")
         with _DB_LOCK:
             owner = shot_owner(db(), machine_id)
@@ -1012,8 +1045,19 @@ class Handler(BaseHTTPRequestHandler):
         os.makedirs(hdir, exist_ok=True)
         ts = "%d" % (time.time() * 1000)
         tmp = os.path.join(hdir, ts + ".part")
+        left = length - len(head)
         with open(tmp, "wb") as fh:
-            fh.write(data)
+            fh.write(head)
+            while left:
+                chunk = self.rfile.read(min(left, 1 << 20))
+                if not chunk:
+                    break
+                fh.write(chunk)
+                left -= len(chunk)
+        if left:   # el cliente corto la conexion a medias
+            os.remove(tmp)
+            self.close_connection = True
+            return self._error(400, "subida incompleta")
         os.replace(tmp, os.path.join(hdir, ts + ".tar.gz"))   # copia nueva: no pisa la anterior
         for old in home_stamps(group_id, owner)[HOME_KEEP:]:
             os.remove(os.path.join(hdir, old + ".tar.gz"))
@@ -1021,9 +1065,9 @@ class Handler(BaseHTTPRequestHandler):
         if team:
             with open(os.path.join(hdir, "team"), "w") as fh:
                 fh.write(team)
-        publish("machine.home", {"machine_id": machine_id, "bytes": len(data),
+        publish("machine.home", {"machine_id": machine_id, "bytes": length,
                                  "at": iso(now())}, group_id)
-        return self._json(200, {"ok": True, "bytes": len(data)})
+        return self._json(200, {"ok": True, "bytes": length})
 
     def _home_get(self, group_id, machine_id, query=None):
         ok, scope = self._admin_scope(token=((query or {}).get("token") or [None])[0])
@@ -1034,41 +1078,39 @@ class Handler(BaseHTTPRequestHandler):
         stamps = home_stamps(group_id, owner)
         if not stamps:
             return self._error(404, "sin código recogido")
-        with open(os.path.join(home_dir(group_id, owner), stamps[0] + ".tar.gz"), "rb") as fh:
-            data = fh.read()
         _, _, team = home_meta_of(group_id, owner)
         name = ((team + "__") if team else "") + owner + ".tar.gz"
-        return self._send(200, data, "application/gzip", {
-            "Cache-Control": "no-store",
-            "Content-Disposition": 'attachment; filename="%s"' % name.replace('"', ""),
-        })
+        with open(os.path.join(home_dir(group_id, owner), stamps[0] + ".tar.gz"), "rb") as fh:
+            return self._send_file(fh, "application/gzip", {
+                "Cache-Control": "no-store",
+                "Content-Disposition": 'attachment; filename="%s"' % name.replace('"', ""),
+            })
 
     def _homes_zip(self, group_id, query=None):
         ok, scope = self._admin_scope(token=((query or {}).get("token") or [None])[0])
         if not ok or not self._scope_ok(scope, group_id):
             return
-        import io
-        import zipfile
         gdir = os.path.join(HOME_DIR, _safe_seg(group_id))
         owners = sorted(o for o in os.listdir(gdir) if os.path.isdir(os.path.join(gdir, o))) \
             if os.path.isdir(gdir) else []
-        buf = io.BytesIO()
-        n = 0
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
-            for owner in owners:   # la copia mas nueva de cada equipo
-                stamps = home_stamps(group_id, owner)
-                if not stamps:
-                    continue
+        files = []
+        for owner in owners:   # la copia mas nueva de cada equipo
+            stamps = home_stamps(group_id, owner)
+            if stamps:
                 team = home_meta_of(group_id, owner)[2]
-                z.write(os.path.join(gdir, owner, stamps[0] + ".tar.gz"),
-                        ((team + "__") if team else "") + owner + ".tar.gz")
-                n += 1
-        if not n:
+                files.append((os.path.join(gdir, owner, stamps[0] + ".tar.gz"),
+                              ((team + "__") if team else "") + owner + ".tar.gz"))
+        if not files:
             return self._error(404, "sin código recogido en el grupo")
-        return self._send(200, buf.getvalue(), "application/zip", {
-            "Cache-Control": "no-store",
-            "Content-Disposition": 'attachment; filename="%s-codigo.zip"' % _safe_seg(group_id),
-        })
+        # el zip se arma en disco (junto a los homes), no en memoria
+        with tempfile.TemporaryFile(dir=HOME_DIR) as buf:
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+                for path, name in files:
+                    z.write(path, name)
+            return self._send_file(buf, "application/zip", {
+                "Cache-Control": "no-store",
+                "Content-Disposition": 'attachment; filename="%s-codigo.zip"' % _safe_seg(group_id),
+            })
 
     def _admin_phase_get(self, query):
         ok, scope = self._admin_scope()
@@ -1130,7 +1172,10 @@ class Handler(BaseHTTPRequestHandler):
         target = body.get("target") or {}
         action = str(body.get("action", ""))
         args = body.get("args") or {}
-        ttl = int(body.get("ttl_seconds") or COMMAND_TTL_SECONDS)
+        try:
+            ttl = int(body.get("ttl_seconds") or COMMAND_TTL_SECONDS)
+        except (TypeError, ValueError):
+            return self._error(400, "ttl_seconds must be a number")
         if action not in ACTIONS:
             return self._error(400, f"unknown action; allowed: {sorted(ACTIONS)}")
         if action in SUPERADMIN_ONLY and scope is not None:
@@ -1283,7 +1328,10 @@ class Handler(BaseHTTPRequestHandler):
         ok, scope = self._admin_scope()
         if not ok:
             return
-        limit = min(int((query.get("limit") or ["50"])[0]), 500)
+        try:
+            limit = min(int((query.get("limit") or ["50"])[0]), 500)
+        except ValueError:
+            return self._error(400, "limit must be a number")
         where = "WHERE c.group_id=?" if scope else ""
         params = ([scope] if scope else []) + [limit]
         rows = db().execute(

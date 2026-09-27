@@ -7,6 +7,7 @@ ack -> poll drains. Also checks the obvious rejections.
 """
 import base64
 import contextlib
+import http.client
 import io
 import json
 import os
@@ -619,6 +620,44 @@ def main():
     s, _ = call("POST", "/admin/cmd", {"target": {"group_id": "lab-uno", "machine_id": "*"}, "action": "screenshot"},
                 token="coord-dos")
     assert s == 404, "...pero no otro grupo (404, como el resto de accesos cruzados)"
+
+    # parametros mal formados -> 400, no 500
+    s, _ = call("GET", "/admin/commands?limit=abc", token="admin-secret")
+    assert s == 400, s
+    s, _ = call("POST", "/admin/cmd", {"target": {"group_id": "lab-uno"}, "action": "lock",
+                                       "ttl_seconds": "abc"}, token="admin-secret")
+    assert s == 400, s
+    c = http.client.HTTPConnection("127.0.0.1", PORT)
+    c.putrequest("POST", "/enroll")
+    c.putheader("Content-Length", "abc")
+    c.endheaders()
+    assert c.getresponse().status == 400
+    c.close()
+
+    # X-Forwarded-For: solo desde el proxy, y la ultima IP (la que agrega el proxy)
+    assert server.client_ip("127.0.0.1", "6.6.6.6, 200.1.1.1") == "200.1.1.1"
+    assert server.client_ip("172.18.0.2", "200.1.1.1") == "200.1.1.1"
+    assert server.client_ip("200.1.1.1", "6.6.6.6") == "200.1.1.1", "desde internet se ignora"
+    assert server.client_ip("127.0.0.1", "") == "127.0.0.1"
+
+    # home grande por partes y subida cortada a medias
+    big = b"\x1f\x8b" + os.urandom(3 << 20)
+    req = urllib.request.Request(BASE + "/cmd/lab-uno/m1/home", method="POST", data=big)
+    req.add_header("Authorization", "Bearer " + bearer)
+    with urllib.request.urlopen(req) as r:
+        assert json.loads(r.read())["bytes"] == len(big)
+    with urllib.request.urlopen(BASE + "/admin/machines/lab-uno/m1/home?token=admin-secret") as r:
+        assert r.read() == big
+    c = http.client.HTTPConnection("127.0.0.1", PORT)
+    c.putrequest("POST", "/cmd/lab-uno/m1/home")
+    c.putheader("Authorization", "Bearer " + bearer)
+    c.putheader("Content-Length", str(len(big)))
+    c.endheaders()
+    c.send(big[:1000])
+    c.sock.shutdown(1)   # corta el envio a medias
+    assert c.getresponse().status == 400
+    c.close()
+    assert not [n for d, _, fs in os.walk(os.path.join(TMP, "homes")) for n in fs if n.endswith(".part")]
 
     print("ok")
 
