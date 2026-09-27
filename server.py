@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-"""Contest control server: enrollment, signed command delivery, health + alerts,
-long-polling, per-venue scoped tokens, teams, coordinator UI.
+"""Servidor de control del concurso.
 
-Stdlib only. Ed25519 signing is delegated to `openssl` (like scripts/build.sh).
-Single process (long-poll + SSE keep in-memory state). Put TLS in front.
-
-Run:  CONTROL_ADMIN_TOKEN=... python3 server.py
-Test: python3 test_server.py
+CONTROL_ADMIN_TOKEN=... python3 server.py
 """
 import base64
 import hmac

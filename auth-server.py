@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""Servicio de login del concurso (el que consulta la ISO en AUTH_SERVICE_URL).
-
-Valida usuario/contraseña contra users.json y responde el contrato que espera
-contestants-login-parse-response.py:
-
-  { "ok": true, "userId", "displayName", "homepage", "logoUrl",
-    "team":   {"id", "name"},
-    "region": {"id", "name", "enrollToken"} }   # enrollToken = el de esa sede en groups.json
-
-El enroll_token de cada sede se toma de groups.json (misma fuente que el
-control-server), asi no se duplica. Solo stdlib.
-
-Env:
-  AUTH_BIND    (0.0.0.0:6666)
-  AUTH_USERS   (./users.json)     credenciales  (gitignored)
-  AUTH_DB      (./data/control.db) homepage y logo administrados por sede
-  AUTH_DEFAULT_HOMEPAGE (file:///usr/share/doc/contest/index.html)
-"""
+"""Login del concurso. Valida contra users.json y devuelve equipo, sede y enrollToken."""
 import hmac
 import json
 import os
