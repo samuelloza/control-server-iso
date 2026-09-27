@@ -50,7 +50,7 @@ La UI del coordinador es `GET /` (la sirve el mismo servidor): **tarjetas por
 máquina** con color de salud (verde/amarillo/rojo/gris según último visto,
 alerta, mem/disco), filtros (con USB, bloqueadas, con alerta, sin equipo,
 offline), banner de alertas con "dispensar", clic → detalle
-(estado/alertas/comandos/journal), botones de acción, roster. Actualiza por
+(estado/alertas/comandos/journal), botones de acción, equipos. Actualiza por
 **SSE** + poll de respaldo. El token va en `sessionStorage`.
 
 ## Grupos y tokens (`groups.json`)
@@ -80,7 +80,7 @@ suyas, y el acceso cruzado devuelve `404` (no `403`, para no filtrar nombres).
 | `GET`  | `/admin/commands?limit=` | admin | Comandos recientes |
 | `GET`  | `/admin/alerts` | admin | Alertas abiertas |
 | `POST` | `/admin/alerts/<id>/dismiss` | admin | Descartar (audita quién + cuándo) |
-| `GET`/`PUT` | `/admin/roster` | admin | Roster de equipos del grupo |
+| `GET`/`PUT` | `/admin/teams` | admin | Equipos del grupo (nombre, universidad, asiento) |
 | `GET`/`PUT` | `/admin/allowlist?group=` | admin | Allowlist de red **persistente** del grupo. `PUT {group_id, hosts:[...]}` la guarda y manda un `set-allowlist` firmado a `*`; además se re-empuja a cada máquina al (re-)enrolar |
 | `GET`/`PUT` | `/admin/homepage?group=` | admin | Página de Firefox por sede. `__global__` es el predeterminado; el login la devuelve al equipo sin enviar comandos masivos |
 | `GET`/`PUT` | `/admin/logo?group=` | admin | URL del logo SVG por sede. `__global__` es el predeterminado; una URL vacía hace que la sede lo herede |

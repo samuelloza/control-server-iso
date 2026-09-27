@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Contest control server: enrollment, signed command delivery, health + alerts,
-long-polling, per-venue scoped tokens, roster, coordinator UI.
+long-polling, per-venue scoped tokens, teams, coordinator UI.
 
 Stdlib only. Ed25519 signing is delegated to `openssl` (like scripts/build.sh).
 Single process (long-poll + SSE keep in-memory state). Put TLS in front.
@@ -124,6 +124,10 @@ def db():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         _conn = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
         _conn.row_factory = sqlite3.Row
+        try:
+            _conn.execute("ALTER TABLE roster RENAME TO teams")   # nombre viejo de la tabla
+        except sqlite3.OperationalError:
+            pass
         _conn.executescript(
             """
             PRAGMA journal_mode=WAL;
@@ -206,7 +210,7 @@ def db():
                 dismissed_by TEXT
             );
             CREATE INDEX IF NOT EXISTS alerts_open ON alerts(group_id, dismissed_at);
-            CREATE TABLE IF NOT EXISTS roster (
+            CREATE TABLE IF NOT EXISTS teams (
                 group_id TEXT NOT NULL,
                 user_id  TEXT NOT NULL,
                 name     TEXT NOT NULL,
@@ -510,7 +514,7 @@ def valid_logo_url(url):
 
 def auto_bind(conn, group_id, machine_id, login):
     """La máquina reporta qué equipo inició sesión -> se liga sola. Si el
-    user_id está en el roster usa ese registro (con asiento, etc.); si no,
+    user_id está en teams usa ese registro (con asiento, etc.); si no,
     liga con el nombre auto-reportado. Devuelve el binding nuevo o None."""
     uid = str(login.get("user_id") or login.get("team_id") or "").strip()
     if not uid:
@@ -524,7 +528,7 @@ def auto_bind(conn, group_id, machine_id, login):
             pass
     region = str(login.get("region") or "").strip() or None
     region_name = str(login.get("region_name") or "").strip() or None
-    e = conn.execute("SELECT * FROM roster WHERE group_id=? AND user_id=?", (group_id, uid)).fetchone()
+    e = conn.execute("SELECT * FROM teams WHERE group_id=? AND user_id=?", (group_id, uid)).fetchone()
     if e:
         binding = {"user_id": e["user_id"], "name": e["name"], "org": e["org"],
                    "seat": e["seat"], "country": e["country"]}
@@ -705,8 +709,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_commands(q)
         if p == ["admin", "alerts"]:
             return self._admin_alerts()
-        if p == ["admin", "roster"]:
-            return self._admin_roster_get()
+        if p == ["admin", "teams"]:
+            return self._admin_teams_get()
         if p == ["admin", "allowlist"]:
             return self._admin_allowlist_get(q)
         if p == ["admin", "homepage"]:
@@ -759,8 +763,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._admin_phase_put()
         if len(p) == 4 and p[0] == "admin" and p[1] == "alerts" and p[3] == "dismiss":
             return self._admin_alert_dismiss(p[2])
-        if p == ["admin", "roster"]:
-            return self._admin_roster_put()
+        if p == ["admin", "teams"]:
+            return self._admin_teams_put()
         if p == ["admin", "allowlist"]:
             return self._admin_allowlist_put()
         if p == ["admin", "homepage"]:
@@ -1370,17 +1374,17 @@ class Handler(BaseHTTPRequestHandler):
         publish("alert.dismissed", {"id": int(alert_id), "by": who}, a["group_id"])
         return self._json(200, {"ok": True})
 
-    # -- admin: roster / bindings --------------------------------
-    def _admin_roster_get(self):
+    # -- admin: teams / bindings --------------------------------
+    def _admin_teams_get(self):
         ok, scope = self._admin_scope()
         if not ok:
             return
         where = "WHERE group_id=?" if scope else ""
         params = [scope] if scope else []
-        rows = db().execute(f"SELECT * FROM roster {where} ORDER BY group_id, seat, name", params).fetchall()
-        return self._json(200, {"roster": [dict(r) for r in rows]})
+        rows = db().execute(f"SELECT * FROM teams {where} ORDER BY group_id, seat, name", params).fetchall()
+        return self._json(200, {"teams": [dict(r) for r in rows]})
 
-    def _admin_roster_put(self):
+    def _admin_teams_put(self):
         ok, scope = self._admin_scope()
         if not ok:
             return
@@ -1394,12 +1398,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         with _DB_LOCK:
             conn = db()
-            conn.execute("DELETE FROM roster WHERE group_id=?", (group_id,))
+            conn.execute("DELETE FROM teams WHERE group_id=?", (group_id,))
             for e in body["entries"]:
                 if not isinstance(e, dict) or not e.get("user_id") or not e.get("name"):
                     continue
                 conn.execute(
-                    "INSERT OR REPLACE INTO roster (group_id, user_id, name, org, seat, country) VALUES (?,?,?,?,?,?)",
+                    "INSERT OR REPLACE INTO teams (group_id, user_id, name, org, seat, country) VALUES (?,?,?,?,?,?)",
                     (group_id, str(e["user_id"])[:64], str(e["name"])[:128],
                      str(e.get("org", ""))[:128] or None, str(e.get("seat", ""))[:32] or None,
                      str(e.get("country", ""))[:8] or None))
@@ -1421,9 +1425,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("UPDATE machines SET binding_json=NULL WHERE machine_id=?", (machine_id,))
                 publish("machine.unbound", {"machine_id": machine_id}, group_id)
                 return self._json(200, {"ok": True})
-            e = conn.execute("SELECT * FROM roster WHERE group_id=? AND user_id=?", (group_id, uid)).fetchone()
+            e = conn.execute("SELECT * FROM teams WHERE group_id=? AND user_id=?", (group_id, uid)).fetchone()
             if not e:
-                return self._error(404, "unknown user_id in roster")
+                return self._error(404, "unknown user_id in teams")
             binding = {"user_id": e["user_id"], "name": e["name"], "org": e["org"],
                        "seat": e["seat"], "country": e["country"]}
             conn.execute("UPDATE machines SET binding_json=? WHERE machine_id=?",

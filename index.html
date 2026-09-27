@@ -616,7 +616,7 @@ async function openDetail(m) {
     dlg.close(); refresh();
   });
   dlg.querySelector("#bind").onclick = async () => {
-    const uid = prompt("user_id del equipo (del roster), vacío = quitar la asignación:");
+    const uid = prompt("user_id del equipo, vacío = quitar la asignación:");
     if (uid == null) return;
     await api(`/admin/machines/${m.group_id}/${m.machine_id}/binding`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid }) });

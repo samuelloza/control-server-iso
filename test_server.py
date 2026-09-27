@@ -336,8 +336,8 @@ def main():
     s, all_creds = call("GET", "/admin/credentials?format=json&group=lab-uno", token="admin-secret")
     assert s == 200 and all_creds["users"][0]["password"] == "hunter2", "superadmin sees any venue"
 
-    # -- phase 5: roster + binding -----------------------------------------
-    s, _ = call("PUT", "/admin/roster",
+    # -- phase 5: teams + binding -----------------------------------------
+    s, _ = call("PUT", "/admin/teams",
                 {"group_id": "lab-uno", "entries": [{"user_id": "t1", "name": "Equipo Uno", "seat": "A3"}]},
                 token="admin-secret")
     assert s == 200
