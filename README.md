@@ -29,6 +29,19 @@ python3 auth-server.py
 La llave pública (`keys/command-signing.pub`) va en la ISO para verificar los
 comandos.
 
+## Código
+
+- `server.py`: arranca el servidor.
+- `control/web.py`: HTTP, permisos y tabla de rutas.
+- `control/commands.py`: comandos firmados (cola, entrega, ack).
+- `control/machines.py`: registro, telemetría, alertas.
+- `control/groups.py`: config por sede (fase, allowlist, homepage, logo, equipos).
+- `control/files.py`: capturas y código recogido.
+- `control/reports.py`: reporte y credenciales.
+- `control/events.py`: SSE para el panel.
+- `control/db.py`, `control/settings.py`: SQLite y configuración.
+- `auth-server.py`: login de los equipos.
+
 ## Tokens
 
 - `CONTROL_ADMIN_TOKEN`: superadmin, ve y controla todas las sedes.

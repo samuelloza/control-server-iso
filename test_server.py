@@ -54,14 +54,16 @@ os.environ.update(
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import server  # noqa: E402
+from datetime import timedelta  # noqa: E402
+from control import commands, machines, settings, web  # noqa: E402
+from control.db import DB_LOCK, db, iso, now  # noqa: E402
 from http.server import ThreadingHTTPServer  # noqa: E402
 
 def iso_ago(secs):
-    return server.iso(server.now() - server.timedelta(seconds=secs))
+    return iso(now() - timedelta(seconds=secs))
 
 
-httpd = server.ControlHTTPServer(("127.0.0.1", 0), server.Handler)
+httpd = web.ControlHTTPServer(("127.0.0.1", 0), web.Handler)
 PORT = httpd.server_address[1]
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 BASE = f"http://127.0.0.1:{PORT}"
@@ -174,7 +176,7 @@ def main():
     assert "server" not in parsed
     assert payload_bytes.endswith(b"\n")
     # canonical: byte-for-byte reproducible
-    assert server.canonical(parsed) == payload_bytes
+    assert commands.canonical(parsed) == payload_bytes
 
     # redelivered until acked
     status, body = call("GET", "/cmd/lab-uno/m1", token=bearer)
@@ -435,7 +437,7 @@ def main():
         "auth_server", os.path.join(os.path.dirname(__file__), "auth-server.py"))
     auth = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(auth)
-    auth.USERS_FILE, auth.GROUPS_FILE, auth.DB_FILE = users, server.GROUPS_FILE, server.DB_PATH
+    auth.USERS_FILE, auth.GROUPS_FILE, auth.DB_FILE = users, settings.GROUPS_FILE, settings.DB_PATH
     assert auth.homepage_for("lab-uno") == global_homepage
     auth_httpd = ThreadingHTTPServer(("127.0.0.1", 0), auth.Handler)
     threading.Thread(target=auth_httpd.serve_forever, daemon=True).start()
@@ -547,16 +549,16 @@ def main():
     bn = enroll("r2")   # r1 sigue reportando: es otra PC del mismo equipo, no un reinicio
     call("POST", "/cmd/lab-uno/r2/status", {"login": {"user_id": "u_r"}}, token=bn)
     assert not has_alert("r2", "restart")
-    with server._DB_LOCK:   # r1 se calla: ahora r3 del equipo aparece = reinicio
-        server.db().execute("UPDATE machines SET last_seen=? WHERE machine_id='r1'", (iso_ago(120),))
+    with DB_LOCK:   # r1 se calla: ahora r3 del equipo aparece = reinicio
+        db().execute("UPDATE machines SET last_seen=? WHERE machine_id='r1'", (iso_ago(120),))
     b3 = enroll("r2b")
     call("POST", "/cmd/lab-uno/r2b/status", {"login": {"user_id": "u_r"}}, token=b3)
     assert has_alert("r2b", "restart"), "reinicio inesperado debe alertar"
     # ... pero no si un admin ordeno el reboot
     bo = enroll("r3")
     call("POST", "/cmd/lab-uno/r3/status", {"login": {"user_id": "u_q"}}, token=bo)
-    with server._DB_LOCK:
-        server.db().execute("UPDATE machines SET last_seen=? WHERE machine_id='r3'", (iso_ago(120),))
+    with DB_LOCK:
+        db().execute("UPDATE machines SET last_seen=? WHERE machine_id='r3'", (iso_ago(120),))
     s, _ = call("POST", "/admin/cmd", {"target": {"machine_id": "r3"}, "action": "reboot"}, token="admin-secret")
     assert s == 200
     bn = enroll("r4")
@@ -567,13 +569,13 @@ def main():
     b5 = enroll("r5")
     call("POST", "/cmd/lab-uno/r5/status", {"login": {"user_id": "u_off"}}, token=b5)
     old = iso_ago(300)
-    with server._DB_LOCK:
-        server.db().execute("UPDATE machines SET last_seen=?, status_at=? WHERE machine_id='r5'", (old, old))
-    server.check_offline()
+    with DB_LOCK:
+        db().execute("UPDATE machines SET last_seen=?, status_at=? WHERE machine_id='r5'", (old, old))
+    machines.check_offline()
     assert not has_alert("r5", "offline"), "en fase idle no se vigila"
     s, _ = call("PUT", "/admin/phase", {"group_id": "lab-uno", "phase": "live"}, token="admin-secret")
     assert s == 200, s
-    server.check_offline()
+    machines.check_offline()
     assert has_alert("r5", "offline")
     call("POST", "/cmd/lab-uno/r5/status", {"login": {"user_id": "u_off"}}, token=b5)
     assert not has_alert("r5", "offline"), "al volver a reportar se cierra sola"
@@ -635,10 +637,10 @@ def main():
     c.close()
 
     # X-Forwarded-For: solo desde el proxy, y la ultima IP (la que agrega el proxy)
-    assert server.client_ip("127.0.0.1", "6.6.6.6, 200.1.1.1") == "200.1.1.1"
-    assert server.client_ip("172.18.0.2", "200.1.1.1") == "200.1.1.1"
-    assert server.client_ip("200.1.1.1", "6.6.6.6") == "200.1.1.1", "desde internet se ignora"
-    assert server.client_ip("127.0.0.1", "") == "127.0.0.1"
+    assert web.client_ip("127.0.0.1", "6.6.6.6, 200.1.1.1") == "200.1.1.1"
+    assert web.client_ip("172.18.0.2", "200.1.1.1") == "200.1.1.1"
+    assert web.client_ip("200.1.1.1", "6.6.6.6") == "200.1.1.1", "desde internet se ignora"
+    assert web.client_ip("127.0.0.1", "") == "127.0.0.1"
 
     # home grande por partes y subida cortada a medias
     big = b"\x1f\x8b" + os.urandom(3 << 20)

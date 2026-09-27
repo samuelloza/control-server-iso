@@ -12,6 +12,7 @@ WORKDIR /app
 
 # keys/, data/, groups.json y users.json se montan desde compose
 COPY server.py auth-server.py index.html icpc-bolivia-logo.svg icpc-bolivia-wallpaper.svg command.schema.json ./
+COPY control/ ./control/
 
 EXPOSE 8090 6666
 
