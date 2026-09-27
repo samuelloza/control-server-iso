@@ -308,10 +308,10 @@ function render() {
   for (const m of machines) if (m.binding) userCount.set(m.binding.user_id, (userCount.get(m.binding.user_id) || 0) + 1);
   // Orden: primero la sede, después el nombre del equipo; las sin equipo al final.
   const key = m => [
-    (m.binding && m.binding.region || "￿"),
-    (m.binding && m.binding.name || "￿"),
+    (m.binding && m.binding.region || "\uffff"),
+    (m.binding && m.binding.name || "\uffff"),
     m.machine_id,
-  ].join(" ").toLowerCase();
+  ].join("\0").toLowerCase();
   // La IP publica es la de la sede fisica (las PCs estan detras de NAT): agrupar por
   // IP muestra cuantas PCs activas hay en cada sede y de que regiones vienen.
   const byip = $("#byip").checked;
