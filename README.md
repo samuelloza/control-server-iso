@@ -15,8 +15,9 @@ cp .env.example .env                  # CONTROL_ADMIN_TOKEN=$(openssl rand -hex 
 docker compose up -d
 ```
 
-Levanta `control-server` (8090), `auth` (6666) y `ntp` (123/udp). Hay que
-poner TLS delante (nginx o caddy).
+Levanta `control-server` (8090) y `auth` (6666). Hay que poner TLS delante
+(nginx o caddy). El host y las máquinas deben sincronizar su reloj con
+`time.cloudflare.com` (UDP 123); este proyecto no levanta un servidor NTP.
 
 Sin Docker:
 

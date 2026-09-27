@@ -29,13 +29,3 @@ services:
     ports:
       - "6666:6666"        # poné TLS delante (p. ej. login-teams.icpcbolivia.org)
     restart: unless-stopped
-
-  ntp:
-    # limitar el 123 a las IPs de las sedes
-    build:
-      context: .
-      dockerfile: ntp/Dockerfile
-    ports:
-      - "123:123/udp"
-    mem_limit: 64m
-    restart: unless-stopped
