@@ -1,4 +1,4 @@
-# Infra del coordinador: control remoto + resolver DNS del concurso.
+# Infra del coordinador: control remoto, login y NTP del concurso.
 # APARTE del build del ISO (nada de esto entra al squashfs). Se levanta en el
 # servidor nacional:  docker compose up -d
 #
@@ -39,25 +39,10 @@ services:
       - "6666:6666"        # poné TLS delante (p. ej. login-teams.icpcbolivia.org)
     restart: unless-stopped
 
-  dns:
-    # Resolver de caché. Su IP pública va en NET_DNS_SERVERS (config/iso.conf).
-    # OJO: resolver abierto; en el server limitá el puerto 53 a las IPs de las
-    # sedes con firewall/VPN. Opcional: si NET_DNS_SERVERS apunta directo a
-    # 1.1.1.1/8.8.8.8 no hace falta este servicio.
-    build:
-      context: .
-      dockerfile: dns/Dockerfile
-    ports:
-      - "53:53/udp"
-      - "53:53/tcp"
-    mem_limit: 128m                  # dnsmasq real usa ~15-40 MB con este cache-size
-    restart: unless-stopped
-
   ntp:
     # Servidor NTP para las máquinas del concurso. Su IP pública va en
-    # NET_NTP_SERVERS (config/iso.conf); si está vacío la ISO cae a
-    # NET_DNS_SERVERS, así que suele ser el mismo host que el resolver.
-    # OJO: igual que el DNS, limitá el puerto 123 a las IPs de las sedes.
+    # NET_NTP_SERVERS (config/iso.conf).
+    # OJO: limitá el puerto 123 a las IPs de las sedes con firewall.
     build:
       context: .
       dockerfile: ntp/Dockerfile

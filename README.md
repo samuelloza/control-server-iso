@@ -28,8 +28,8 @@ localhost. `keys/`, `data/`, `groups.json` y `.env` están gitignored.
 
 ### Con Docker
 
-`docker-compose.yml` levanta el control-server (`:8090` en loopback) + un
-resolver DNS de caché (`:53`, ver `dns/`). Aparte del build del ISO.
+`docker-compose.yml` levanta el control-server (`:8090`), el login (`:6666`) y
+NTP (`:123`, ver `ntp/`). Aparte del build del ISO.
 
 ```sh
 ./make-keys.sh
@@ -37,9 +37,6 @@ cp groups.json.example groups.json   # o el que ya tengas
 cp .env.example .env                 # editá CONTROL_ADMIN_TOKEN
 docker compose up -d
 ```
-
-Si `NET_DNS_SERVERS` del ISO apunta directo a 1.1.1.1/8.8.8.8, el servicio `dns`
-sobra: `docker compose up -d control-server`.
 
 **Clave de firma:** lo más lazy es apuntar `CONTROL_SIGNING_KEY` a la MISMA clave
 Ed25519 que las actualizaciones firmadas del ISO. Así la máquina ya tiene la
