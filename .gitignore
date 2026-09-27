@@ -1,0 +1,26 @@
+# Secretos / credenciales
+.env
+.env.*
+!.env.example
+keys/
+*.key
+*.pem
+groups.json
+groups.json.*.bak
+users.json
+*.bak
+
+# Datos en runtime
+data/
+auth-events.txt
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.pyc
+
+# Varios
+image.png
+.DS_Store

@@ -1,0 +1,6 @@
+keys/
+data/
+groups.json
+.env
+__pycache__/
+*.pyc
