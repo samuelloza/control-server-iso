@@ -109,8 +109,7 @@ def screenshot_upload(h, group_id, machine_id):
 
 
 def screenshot_get(h, group_id, machine_id, query=None):
-    # <img> no manda headers, por eso ?token=
-    ok, scope = h.admin_scope(token=((query or {}).get("token") or [None])[0])
+    ok, scope = h.admin_scope()
     if not ok or not h.scope_ok(scope, group_id):
         return
     try:
@@ -123,7 +122,7 @@ def screenshot_get(h, group_id, machine_id, query=None):
 
 def shots(h, group_id, machine_id, ts, query):
     """Sin ts lista las capturas; con ts devuelve esa."""
-    ok, scope = h.admin_scope(token=((query or {}).get("token") or [None])[0])
+    ok, scope = h.admin_scope()
     if not ok or not h.scope_ok(scope, group_id):
         return
     with DB_LOCK:
@@ -181,7 +180,7 @@ def home_upload(h, group_id, machine_id):
 
 
 def home_get(h, group_id, machine_id, query=None):
-    ok, scope = h.admin_scope(token=((query or {}).get("token") or [None])[0])
+    ok, scope = h.admin_scope()
     if not ok or not h.scope_ok(scope, group_id):
         return
     with DB_LOCK:
@@ -199,7 +198,7 @@ def home_get(h, group_id, machine_id, query=None):
 
 
 def homes_zip(h, group_id, query=None):
-    ok, scope = h.admin_scope(token=((query or {}).get("token") or [None])[0])
+    ok, scope = h.admin_scope()
     if not ok or not h.scope_ok(scope, group_id):
         return
     gdir = os.path.join(HOME_DIR, safe_seg(group_id))

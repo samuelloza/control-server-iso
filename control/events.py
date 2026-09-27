@@ -22,8 +22,7 @@ def publish(evt, data, group_id=None):
 
 
 def sse(h, query):
-    # EventSource no manda headers, por eso ?token=
-    ok, scope = h.admin_scope(token=(query.get("token") or [None])[0])
+    ok, scope = h.admin_scope()
     if not ok:
         return
     q = queue.Queue(maxsize=256)

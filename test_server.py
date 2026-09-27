@@ -85,6 +85,12 @@ def call(method, path, body=None, token=None):
         return exc.code, (json.loads(raw) if raw else None)
 
 
+def get_raw(path, token="admin-secret"):
+    """GET con la cookie de sesion, como lo hace el navegador en <img>/descargas."""
+    req = urllib.request.Request(BASE + path, headers={"Cookie": "cc_token=" + token})
+    return urllib.request.urlopen(req)
+
+
 def verify(payload_bytes, signature_b64):
     sig = os.path.join(TMP, "sig.bin")
     msg = os.path.join(TMP, "msg.bin")
@@ -449,6 +455,19 @@ def main():
         login = json.load(response)
         assert login["homepage"] == homepage
         assert login["logoUrl"] == site_logo
+
+    def login_as(pw):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{auth_httpd.server_address[1]}/login",
+            data=json.dumps({"username": "team", "password": pw}).encode(), method="POST")
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read())
+    for _ in range(auth.MAX_FAILS):
+        assert login_as("mal")["message"] == "Usuario o contraseña incorrectos"
+    blocked = login_as("secret")   # aun con la clave correcta
+    assert not blocked["ok"] and "Demasiados intentos" in blocked["message"], blocked
+    auth._fails.clear()
+    assert login_as("secret")["ok"]
     auth_httpd.shutdown()
 
     # phase 5: sync HTML report
@@ -468,13 +487,11 @@ def main():
     with urllib.request.urlopen(r) as res:
         assert res.status == 200, res.status
 
-    r = urllib.request.Request(BASE + "/admin/machines/lab-uno/m1/home?token=admin-secret")
-    with urllib.request.urlopen(r) as res:
+    with get_raw("/admin/machines/lab-uno/m1/home") as res:
         assert res.status == 200 and res.read() == blob
         assert "equipo42" in res.headers.get("Content-Disposition", "")
 
-    r = urllib.request.Request(BASE + "/admin/homes/lab-uno?token=admin-secret")
-    with urllib.request.urlopen(r) as res:
+    with get_raw("/admin/homes/lab-uno") as res:
         import io as _io
         import zipfile as _zip
         names = _zip.ZipFile(_io.BytesIO(res.read())).namelist()
@@ -595,7 +612,7 @@ def main():
     call("POST", "/cmd/lab-uno/s2/status", {"login": {"user_id": "u_shot"}}, token=b7)
     s, sh2 = call("GET", "/admin/machines/lab-uno/s2/shots", token="admin-secret")
     assert sh2["shots"] == sh["shots"], (sh, sh2)
-    with urllib.request.urlopen(BASE + f"/admin/machines/lab-uno/s2/shots/{sh['shots'][0]}?token=admin-secret") as r:
+    with get_raw(f"/admin/machines/lab-uno/s2/shots/{sh['shots'][0]}") as r:
         assert r.read()[:8] == b"\x89PNG\r\n\x1a\n"
 
     # cupos por sede: esperados (users.json, solo cuentas con team_id), conectados y faltantes
@@ -648,7 +665,7 @@ def main():
     req.add_header("Authorization", "Bearer " + bearer)
     with urllib.request.urlopen(req) as r:
         assert json.loads(r.read())["bytes"] == len(big)
-    with urllib.request.urlopen(BASE + "/admin/machines/lab-uno/m1/home?token=admin-secret") as r:
+    with get_raw("/admin/machines/lab-uno/m1/home") as r:
         assert r.read() == big
     c = http.client.HTTPConnection("127.0.0.1", PORT)
     c.putrequest("POST", "/cmd/lab-uno/m1/home")
@@ -660,6 +677,38 @@ def main():
     assert c.getresponse().status == 400
     c.close()
     assert not [n for d, _, fs in os.walk(os.path.join(TMP, "homes")) for n in fs if n.endswith(".part")]
+
+    # sesion: el token pasa a una cookie HttpOnly y ya no se acepta en la URL
+    req = urllib.request.Request(BASE + "/admin/session", method="POST",
+                                 headers={"Authorization": "Bearer admin-secret"})
+    with urllib.request.urlopen(req) as r:
+        cookie = r.headers["Set-Cookie"]
+    assert cookie.startswith("cc_token=admin-secret") and "HttpOnly" in cookie \
+        and "SameSite=Strict" in cookie and "Path=/admin" in cookie, cookie
+    s, _ = call("POST", "/admin/session", token="nope")
+    assert s == 401
+    try:
+        urllib.request.urlopen(BASE + "/admin/report?token=admin-secret")
+        raise AssertionError("?token= ya no debe funcionar")
+    except urllib.error.HTTPError as e:
+        assert e.code == 401
+    with get_raw("/admin/report") as r:
+        assert r.status == 200
+    with get_raw("/admin/events") as r:   # SSE con cookie
+        assert r.status == 200 and r.readline() == b": connected\n"
+    # la cookie no sirve para POST (un sitio externo no puede mandar comandos)
+    req = urllib.request.Request(BASE + "/admin/cmd", method="POST",
+                                 data=json.dumps({"target": {"group_id": "lab-uno"}, "action": "lock"}).encode(),
+                                 headers={"Cookie": "cc_token=admin-secret", "Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req)
+        raise AssertionError("POST con cookie no debe pasar")
+    except urllib.error.HTTPError as e:
+        assert e.code == 401
+
+    # tokens cortos: el servidor no arranca
+    import server as entry
+    assert "CONTROL_ADMIN_TOKEN" in entry.weak_tokens() and "lab-uno.enroll_token" in entry.weak_tokens()
 
     print("ok")
 

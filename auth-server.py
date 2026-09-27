@@ -5,8 +5,12 @@ import json
 import os
 import re
 import sqlite3
+import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from control.web import client_ip
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIND = os.environ.get("AUTH_BIND", "0.0.0.0:6666")
@@ -18,6 +22,33 @@ DEFAULT_HOMEPAGE = os.environ.get(
     "AUTH_DEFAULT_HOMEPAGE", "file:///usr/share/doc/contest/index.html")
 
 TEAM_ID_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+# Limite de intentos fallidos por (IP, usuario). No solo por IP: toda una sede
+# sale con la misma IP publica y un bloqueo por IP la dejaria sin login.
+MAX_FAILS = 10
+FAIL_WINDOW = 300   # segundos
+_fails = {}
+_fails_lock = threading.Lock()
+
+
+def blocked(key):
+    now = time.monotonic()
+    with _fails_lock:
+        recent = [t for t in _fails.get(key, ()) if now - t < FAIL_WINDOW]
+        if recent:
+            _fails[key] = recent
+        else:
+            _fails.pop(key, None)
+        return len(recent) >= MAX_FAILS
+
+
+def add_fail(key):
+    now = time.monotonic()
+    with _fails_lock:
+        if len(_fails) > 10000:   # usuarios inventados: limpiar los viejos
+            for k in [k for k, ts in _fails.items() if now - ts[-1] >= FAIL_WINDOW]:
+                del _fails[k]
+        _fails.setdefault(key, []).append(now)
 
 
 def now_iso():
@@ -113,9 +144,14 @@ class Handler(BaseHTTPRequestHandler):
         username = str(data.get("username", "")).strip()
         password = str(data.get("password", ""))
 
+        key = (client_ip(self.client_address[0], self.headers.get("X-Forwarded-For", "")), username)
+        if blocked(key):
+            return self._json(200, {"ok": False,
+                                    "message": "Demasiados intentos. Espera unos minutos."})
         users = load_json(USERS_FILE, {})
         rec = users.get(username) if isinstance(users.get(username), dict) else None
         if not rec or not hmac.compare_digest(password, str(rec.get("password", "\0"))):
+            add_fail(key)
             return self._json(200, {"ok": False, "message": "Usuario o contraseña incorrectos"})
 
         region_id = str(rec.get("region", "")).strip()

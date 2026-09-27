@@ -247,11 +247,10 @@
 const $ = s => document.querySelector(s);
 const tok = $("#token");
 
-// Token por URL: ?token=… (o #token=…). Se guarda y se limpia del address bar
-// para no dejarlo a la vista; el enlace con ?token= se puede marcar como favorito.
+// Token por URL: #token=… (el # no llega al servidor ni a los logs). Se guarda
+// y se limpia del address bar; el enlace se puede marcar como favorito.
 (() => {
-  const q = new URLSearchParams(location.search).get("token")
-         || new URLSearchParams(location.hash.slice(1)).get("token");
+  const q = new URLSearchParams(location.hash.slice(1)).get("token");
   if (q) {
     sessionStorage.setItem("cc_token", q.trim());
     try { history.replaceState(null, "", location.pathname); } catch (e) {}
@@ -470,14 +469,14 @@ async function refreshAlerts() {
 $("#report").onclick = e => {
   e.preventDefault();
   const g = $("#group").value;
-  const u = "/admin/report?token=" + encodeURIComponent(tok.value.trim()) + (g ? "&group=" + g : "");
+  const u = "/admin/report" + (g ? "?group=" + g : "");
   window.open(u, "_blank");
 };
 
 $("#credentials").onclick = e => {
   e.preventDefault();
   const g = $("#group").value;
-  const u = "/admin/credentials?token=" + encodeURIComponent(tok.value.trim()) + (g ? "&group=" + g : "");
+  const u = "/admin/credentials" + (g ? "?group=" + g : "");
   window.open(u, "_blank");
 };
 
@@ -485,7 +484,7 @@ $("#dlhomes").onclick = e => {
   e.preventDefault();
   const g = $("#group").value || scope;
   if (!g) return alert("Elegí un grupo primero.");
-  window.open("/admin/homes/" + encodeURIComponent(g) + "?token=" + encodeURIComponent(tok.value.trim()), "_blank");
+  window.open("/admin/homes/" + encodeURIComponent(g), "_blank");
 };
 
 document.querySelectorAll(".actions button").forEach(b => b.onclick = () => send(b.dataset.a));
@@ -553,14 +552,13 @@ async function openDetail(m) {
     <p class="muted">código recogido: ${d.home_age == null ? "todavía no"
       : "hace " + (d.home_age < 90 ? d.home_age + "s" : Math.floor(d.home_age / 60) + "m")
         + " · " + (d.home_size != null ? (d.home_size / 1048576).toFixed(1) + " MB" : "?")
-        + ' · <a href="/admin/machines/' + m.group_id + '/' + m.machine_id + '/home?token='
-        + encodeURIComponent(tok.value.trim()) + '" target="_blank">descargar .tar.gz</a>'}</p>
+        + ' · <a href="/admin/machines/' + m.group_id + '/' + m.machine_id + '/home" target="_blank">descargar .tar.gz</a>'}</p>
     <p class="muted">equipo: ${d.binding ? d.binding.name + (d.binding.seat ? " (asiento " + d.binding.seat + ")" : "")
         + (d.binding.region ? " · sede reportada en login: <b>" + d.binding.region + (d.binding.region_name ? " (" + d.binding.region_name + ")" : "") + "</b>"
             + (d.binding.region_mismatch ? " ⚑ NO coincide con el grupo " + m.group_id : "") : "")
       : "sin equipo asignado"}</p>
     <img id="shot" alt="" style="max-width:100%;border:1px solid var(--b);${d.screenshot_age == null ? "display:none" : ""}"
-      src="/admin/machines/${m.group_id}/${m.machine_id}/screenshot?token=${encodeURIComponent(tok.value.trim())}&t=${Date.now()}">
+      src="/admin/machines/${m.group_id}/${m.machine_id}/screenshot?t=${Date.now()}">
     <div id="shotstrip" style="display:flex;gap:.3rem;overflow-x:auto;margin-top:.4rem"></div>
     <p class="muted" id="shotmeta">${d.screenshot_age == null ? "sin captura" : "captura hace " + d.screenshot_age + "s"}</p>
     <p class="muted">editores: ${Object.keys(st.editors || {}).length
@@ -608,7 +606,7 @@ async function openDetail(m) {
       $("#shotmeta").textContent = "capturando… (se actualiza en unos segundos)";
       setTimeout(() => {
         const img = $("#shot");
-        img.src = `/admin/machines/${m.group_id}/${m.machine_id}/screenshot?token=${encodeURIComponent(tok.value.trim())}&t=${Date.now()}`;
+        img.src = `/admin/machines/${m.group_id}/${m.machine_id}/screenshot?t=${Date.now()}`;
         img.style.display = ""; $("#shotmeta").textContent = "captura recién pedida";
       }, 5000);
       return;
@@ -630,14 +628,14 @@ async function openDetail(m) {
     dlg.close(); refresh();
   };
   // Historial de capturas del equipo (mas nuevas primero); clic = verla grande.
-  const tk = encodeURIComponent(tok.value.trim()), base = `/admin/machines/${m.group_id}/${m.machine_id}`;
+  const base = `/admin/machines/${m.group_id}/${m.machine_id}`;
   api(`${base}/shots`).then(r => r.json()).then(({ shots }) => {
     const strip = $("#shotstrip");
     if (!strip) return;
     strip.innerHTML = "";
     for (const ts of shots.slice(0, 40)) {   // las 40 mas nuevas; el resto sigue en disco
       const im = document.createElement("img");
-      im.src = `${base}/shots/${ts}?token=${tk}`;
+      im.src = `${base}/shots/${ts}`;
       im.loading = "lazy";
       im.title = new Date(+ts).toLocaleTimeString();
       im.style.cssText = "height:56px;border:1px solid var(--b);border-radius:4px;cursor:pointer";
@@ -710,7 +708,7 @@ $("#logosave").onclick = async () => {
 
 function connectSSE() {
   if (es) es.close();
-  es = new EventSource("/admin/events?token=" + encodeURIComponent(tok.value.trim()));
+  es = new EventSource("/admin/events");
   const bump = () => refresh();
   ["command.sent", "command.acked", "machine.first_seen", "machine.locked",
    "machine.unlocked", "alert.raised", "alert.dismissed", "machine.bound", "machine.unbound",
@@ -719,8 +717,10 @@ function connectSSE() {
   es.onerror = () => {};
 }
 
-function boot() {
+// La cookie de sesion la usan imagenes, SSE y descargas (no pueden mandar headers).
+async function boot() {
   if (!tok.value.trim()) return;
+  try { await api("/admin/session", { method: "POST" }); } catch (e) { return; }
   refresh().then(() => { loadAllowlist(); loadHomepage(); loadLogo(); }); connectSSE();
 }
 setInterval(refresh, 10000);

@@ -7,8 +7,7 @@ from control.machines import machine_rows
 
 
 def admin_report(h, query):
-    # se abre en otra pestaña, por eso ?token=
-    ok, scope = h.admin_scope(token=(query.get("token") or [None])[0])
+    ok, scope = h.admin_scope()
     if not ok:
         return
     group_id = (query.get("group") or [scope or ""])[0]
@@ -28,8 +27,7 @@ def admin_report(h, query):
 
 
 def admin_credentials(h, query):
-    # se abre en otra pestaña, por eso ?token=
-    ok, scope = h.admin_scope(token=(query.get("token") or [None])[0])
+    ok, scope = h.admin_scope()
     if not ok:
         return
     group_id = (query.get("group") or [scope or ""])[0]

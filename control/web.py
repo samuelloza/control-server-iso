@@ -1,5 +1,6 @@
 """Servidor HTTP: helpers de request/response, permisos y rutas."""
 import hmac
+import http.cookies
 import ipaddress
 import json
 import os
@@ -27,6 +28,8 @@ class ControlHTTPServer(ThreadingHTTPServer):
         if not isinstance(sys.exc_info()[1], ConnectionResetError):
             super().handle_error(request, client_address)
 
+
+COOKIE = "cc_token"
 
 # (partes de la ruta, handler). "*" captura ese segmento y se pasa al handler.
 GET = [
@@ -64,6 +67,7 @@ POST = [
     (("cmd", "*", "*", "events"), lambda h, q, g, m: machines.machine_event(h, g, m)),
     (("cmd", "*", "*", "screenshot"), lambda h, q, g, m: files.screenshot_upload(h, g, m)),
     (("cmd", "*", "*", "home"), lambda h, q, g, m: files.home_upload(h, g, m)),
+    (("admin", "session"), lambda h, q: h.admin_session()),
     (("admin", "cmd"), lambda h, q: commands.admin_cmd(h)),
     (("admin", "alerts", "*", "dismiss"), lambda h, q, a: machines.admin_alert_dismiss(h, a)),
     (("admin", "machines", "*", "*", "binding"), lambda h, q, g, m: machines.admin_binding(h, g, m)),
@@ -151,9 +155,20 @@ class Handler(BaseHTTPRequestHandler):
     def client_ip(self):
         return client_ip(self.client_address[0], self.headers.get("X-Forwarded-For", ""))
 
-    def admin_scope(self, token=None):
+    def admin_token(self):
+        """Bearer del header; en GET tambien la cookie (imagenes, SSE y descargas no mandan headers)."""
+        tok = self.bearer()
+        if not tok and self.command in ("GET", "HEAD"):
+            try:
+                c = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+            except http.cookies.CookieError:
+                return ""
+            tok = c[COOKIE].value if COOKIE in c else ""
+        return tok
+
+    def admin_scope(self):
         """(ok, scope): scope None = superadmin, si no el grupo del token."""
-        tok = token if token is not None else self.bearer()
+        tok = self.admin_token()
         if ADMIN_TOKEN and hmac.compare_digest(tok, ADMIN_TOKEN):
             return True, None
         for gid, rec in group_records().items():
@@ -164,6 +179,19 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.error(401, "bad admin token")
         return False, None
+
+    def admin_session(self):
+        """Pasa el token del header a una cookie HttpOnly, asi nunca va en la URL."""
+        ok, scope = self.admin_scope()
+        if not ok:
+            return
+        c = http.cookies.SimpleCookie()
+        c[COOKIE] = self.bearer()
+        c[COOKIE].update({"path": "/admin", "httponly": True, "samesite": "Strict", "max-age": 43200})
+        if self.headers.get("X-Forwarded-Proto") == "https":
+            c[COOKIE]["secure"] = True
+        self.send(200, json.dumps({"ok": True, "scope": scope}), "application/json",
+                  {"Set-Cookie": c[COOKIE].OutputString()})
 
     def scope_ok(self, scope, group_id):
         """404 y no 403, para no revelar que sedes existen."""

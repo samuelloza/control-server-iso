@@ -10,7 +10,7 @@ Solo usa Python 3 (stdlib) y `openssl`.
 ```sh
 ./make-keys.sh                        # keys/command-signing.key y .pub
 ./make-groups.sh lapaz sucre cbba     # groups.json con tokens por sede
-cp .env.example .env                  # poner CONTROL_ADMIN_TOKEN
+cp .env.example .env                  # CONTROL_ADMIN_TOKEN=$(openssl rand -hex 24)
 # users.json: equipos con password, team_id, team_name y region
 docker compose up -d
 ```
@@ -48,6 +48,8 @@ comandos.
 - `admin_token` de cada sede en `groups.json`: el coordinador solo ve su sede.
   Algunas acciones (abrir red/USB, allowlist, recoger código, root) son solo
   para superadmin.
+- Todos los tokens deben tener al menos 32 caracteres; si no, el servidor no arranca.
+- El login de equipos se bloquea 5 minutos tras 10 intentos fallidos por IP y usuario.
 - `enroll_token`: lo usan las máquinas para registrarse. El login se lo pasa a
   cada equipo según su sede.
 
@@ -66,7 +68,8 @@ Máquinas (`Bearer` que devuelve `/enroll`):
 | `POST /cmd/<g>/<m>/screenshot` | captura PNG |
 | `POST /cmd/<g>/<m>/home` | tar.gz del home del equipo |
 
-Admin (`Bearer` admin, o `?token=` en SSE, reportes y descargas):
+Admin (`Bearer` admin; en GET también la cookie que da `POST /admin/session`,
+para imágenes, SSE y descargas):
 
 | | |
 |---|---|
