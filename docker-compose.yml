@@ -1,6 +1,7 @@
 # Antes: ./make-keys.sh, ./make-groups.sh <sedes...>, users.json y .env
 services:
   control-server:
+    image: ${CONTROL_SERVER_IMAGE:-control-server:local}
     build:
       context: .
     env_file: .env
@@ -16,6 +17,7 @@ services:
     restart: unless-stopped
 
   auth:
+    image: ${CONTROL_SERVER_IMAGE:-control-server:local}
     build:
       context: .
     command: ["python3", "auth-server.py"]

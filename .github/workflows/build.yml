@@ -1,0 +1,44 @@
+name: Build and publish
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CONTROL_SERVER_IMAGE: control-server:ci
+  CONTROL_SERVER_PACKAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test
+        run: python3 test_server.py
+      - name: Build control server
+        run: docker build --tag "$CONTROL_SERVER_IMAGE" .
+      - name: Start all services
+        run: |
+          cp .env.example .env
+          sed -i 's/^CONTROL_ADMIN_TOKEN=.*/CONTROL_ADMIN_TOKEN=ci-admin-token-000000000000000000/' .env
+          ./make-keys.sh
+          ./make-groups.sh ci
+          printf '{}\n' > users.json
+          docker compose up --detach --no-build
+          sleep 3
+          test "$(docker compose ps --services --filter status=running | wc -l)" -eq 2
+          curl --fail --silent http://127.0.0.1:8090/ >/dev/null
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish packages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag "$CONTROL_SERVER_IMAGE" "$CONTROL_SERVER_PACKAGE:main"
+          docker push --all-tags "$CONTROL_SERVER_PACKAGE"
