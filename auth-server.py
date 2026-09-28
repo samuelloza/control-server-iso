@@ -15,7 +15,7 @@ from control.web import client_ip
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIND = os.environ.get("AUTH_BIND", "0.0.0.0:6666")
 USERS_FILE = os.environ.get("AUTH_USERS", os.path.join(HERE, "users.json"))
-GROUPS_FILE = os.path.join(HERE, "groups.json")
+GROUPS_FILE = os.environ.get("CONTROL_GROUP_TOKENS", os.path.join(HERE, "groups.json"))
 LOG_FILE = os.path.join(HERE, "data", "auth-events.txt")
 DB_FILE = os.environ.get("AUTH_DB", os.path.join(HERE, "data", "control.db"))
 DEFAULT_HOMEPAGE = os.environ.get(

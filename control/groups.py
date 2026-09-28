@@ -1,11 +1,16 @@
 """Configuracion por sede: tokens, usuarios, fase, allowlist, homepage, logo y equipos."""
 import json
+import os
+import threading
 from urllib.parse import urlparse
 
 from control.commands import enqueue_command
 from control.db import CMD_COND, DB_LOCK, db, iso, now, since_seconds, stored_phase
 from control.events import publish
-from control.settings import DEFAULT_HOMEPAGE, GROUPS_FILE, PHASES, STATUS_EVERY, USERS_FILE
+from control.settings import DEFAULT_HOMEPAGE, GROUPS_FILE, MACHINE_ID_OK, PHASES, STATUS_EVERY, USERS_FILE
+
+
+GROUPS_LOCK = threading.Lock()
 
 
 def group_records():
@@ -54,6 +59,62 @@ def users_for_group(group_id):
         })
     out.sort(key=lambda u: u["username"])
     return out
+
+
+def admin_group_put(h, group_id):
+    """Registra un grupo; solo superadmin. El servidor conserva y escribe su propio archivo."""
+    ok, scope = h.admin_scope()
+    if not ok:
+        return
+    if scope is not None:
+        return h.error(403, "groups: solo con el token superadmin")
+    if not MACHINE_ID_OK(group_id) or group_id.startswith("_"):
+        return h.error(400, "group_id inválido")
+    body = h.read_json()
+    if not isinstance(body, dict):
+        return h.error(400, "expected {enroll_token, admin_token?, label?}")
+    enroll_token = body.get("enroll_token")
+    admin_token = body.get("admin_token")
+    if not isinstance(enroll_token, str) or (admin_token is not None and not isinstance(admin_token, str)):
+        return h.error(400, "tokens must be strings")
+    if group_id != "lobby" and not admin_token:
+        return h.error(400, "admin_token is required")
+    if len(enroll_token) < 32 or (admin_token is not None and len(admin_token) < 32):
+        return h.error(400, "tokens must have at least 32 characters")
+    label = body.get("label", group_id)
+    if not isinstance(label, str):
+        return h.error(400, "label must be a string")
+    label = label.strip()[:128] or group_id
+
+    with GROUPS_LOCK:
+        try:
+            with open(GROUPS_FILE, encoding="utf-8") as fh:
+                groups = json.load(fh)
+        except FileNotFoundError:
+            groups = {}
+        except (OSError, ValueError) as exc:
+            return h.error(500, f"cannot read groups file: {exc}")
+        if not isinstance(groups, dict):
+            return h.error(500, "groups file must be a JSON object")
+        groups[group_id] = {
+            "enroll_token": enroll_token,
+            "admin_token": admin_token,
+            "label": label,
+        }
+        os.makedirs(os.path.dirname(os.path.abspath(GROUPS_FILE)), exist_ok=True)
+        temp = GROUPS_FILE + ".tmp"
+        try:
+            with open(temp, "w", encoding="utf-8") as fh:
+                json.dump(groups, fh, ensure_ascii=False, indent=2)
+                fh.write("\n")
+            os.replace(temp, GROUPS_FILE)
+        except OSError as exc:
+            try:
+                os.unlink(temp)
+            except FileNotFoundError:
+                pass
+            return h.error(500, f"cannot write groups file: {exc}")
+    return h.json(200, {"ok": True, "group_id": group_id, "label": label})
 
 
 def stored_allowlist(conn, group_id):

@@ -7,6 +7,8 @@ services:
     env_file: .env
     environment:
       CONTROL_BIND: 0.0.0.0:8090     # dentro del contenedor; el host lo publica en loopback
+      CONTROL_GROUP_TOKENS: /app/data/groups.json
+    command: ["sh", "-c", "if [ ! -e /app/data/groups.json ]; then cp /app/groups.json /app/data/groups.json && chmod 600 /app/data/groups.json; fi; exec python3 server.py"]
     volumes:
       - ./keys:/app/keys:ro
       - ./groups.json:/app/groups.json:ro
@@ -24,6 +26,7 @@ services:
     env_file: .env
     environment:
       AUTH_BIND: 0.0.0.0:6666
+      CONTROL_GROUP_TOKENS: /app/data/groups.json
     volumes:
       - ./groups.json:/app/groups.json:ro
       - ./users.json:/app/users.json:ro

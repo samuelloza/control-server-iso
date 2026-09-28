@@ -306,6 +306,29 @@ def main():
 
     # phase 4: per-venue scoped admin token
     call("POST", "/enroll", {"machine_id": "d1", "group_id": "lab-dos", "enroll_token": "enroll-dos"})
+    # Patito provisions one control group per exam over HTTP; group tokens never manage groups.
+    dynamic_enroll = "dynamic-enroll-token-0000000000000000"
+    dynamic_admin = "dynamic-admin-token-00000000000000000"
+    s, _ = call("PUT", "/admin/groups/contest-5",
+                {"enroll_token": dynamic_enroll, "admin_token": dynamic_admin, "label": "Parcial 5"},
+                token="coord-dos")
+    assert s == 403, s
+    s, _ = call("PUT", "/admin/groups/contest-5",
+                {"enroll_token": "short", "admin_token": dynamic_admin}, token="admin-secret")
+    assert s == 400, s
+    s, _ = call("PUT", "/admin/groups/contest-5",
+                {"enroll_token": dynamic_enroll}, token="admin-secret")
+    assert s == 400, s
+    s, b = call("PUT", "/admin/groups/contest-5",
+                {"enroll_token": dynamic_enroll, "admin_token": dynamic_admin, "label": "Parcial 5"},
+                token="admin-secret")
+    assert s == 200 and b == {"ok": True, "group_id": "contest-5", "label": "Parcial 5"}, (s, b)
+    s, _ = call("POST", "/enroll",
+                {"machine_id": "exam-pc", "group_id": "contest-5", "enroll_token": dynamic_enroll})
+    assert s == 200, s
+    with open(settings.GROUPS_FILE, encoding="utf-8") as fh:
+        saved_groups = json.load(fh)
+    assert "lab-uno" in saved_groups and saved_groups["contest-5"]["admin_token"] == dynamic_admin
     s, mine = call("GET", "/admin/machines", token="coord-dos")
     assert s == 200 and mine["scope"] == "lab-dos"
     assert all(m["group_id"] == "lab-dos" for m in mine["machines"]), "scoped token must only see its group"
