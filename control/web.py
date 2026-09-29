@@ -73,6 +73,7 @@ POST = [
     (("admin", "machines", "*", "*", "binding"), lambda h, q, g, m: machines.admin_binding(h, g, m)),
     (("admin", "machines", "*", "*", "location"), lambda h, q, g, m: machines.admin_location(h, g, m)),
     (("admin", "teams"), lambda h, q: groups.admin_teams_put(h)),
+    (("admin", "groups", "*"), lambda h, q, g: groups.admin_group_put(h, g)),
     (("admin", "allowlist"), lambda h, q: groups.admin_allowlist_put(h)),
     (("admin", "homepage"), lambda h, q: groups.admin_cfg_put(h, "homepage")),
     (("admin", "logo"), lambda h, q: groups.admin_cfg_put(h, "logo_url")),

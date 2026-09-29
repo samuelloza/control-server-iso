@@ -18,6 +18,8 @@ docker compose up -d
 Levanta `control-server` (8090) y `auth` (6666). Hay que poner TLS delante
 (nginx o caddy). El host y las máquinas deben sincronizar su reloj con
 `time.cloudflare.com` (UDP 123); este proyecto no levanta un servidor NTP.
+En el primer arranque Docker copia `groups.json` a `data/groups.json`; desde
+entonces esa copia persistente es la fuente de verdad y el servidor la actualiza.
 
 Sin Docker:
 
@@ -75,6 +77,7 @@ para imágenes, SSE y descargas):
 | | |
 |---|---|
 | `POST /admin/cmd` | mandar comando a una máquina o sede |
+| `PUT /admin/groups/<g>` | crear/actualizar un grupo (solo superadmin) |
 | `GET /admin/machines` | lista de máquinas |
 | `GET /admin/machines/<g>/<m>` | detalle |
 | `GET /admin/machines/<g>/<m>/screenshot` | última captura |
