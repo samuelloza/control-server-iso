@@ -420,7 +420,7 @@ async function refresh() {
     render();
     const cs = await (await api("/admin/commands?limit=40")).json();
     $("#log").textContent = cs.commands.map(c =>
-      `${c.issued_at}  ${c.action.padEnd(13)} ${(c.machine_id === "*" ? "grupo " + c.group_id : c.machine_id).padEnd(22)} ${c.delivered}/${c.acked}  [${c.status}]`
+      `${c.issued_at}  ${c.action.padEnd(13)} ${(c.machine_id === "*" ? "grupo " + c.group_id : c.machine_id).padEnd(22)} ${c.acked}/${c.delivered}  [${c.machine_id === "*" ? (c.delivered && c.acked === c.delivered ? "ok" : c.acked + " de " + c.delivered + " confirmadas") : c.status}]`
     ).join("\n") || "—";
     await refreshAlerts();
     await refreshQuota();
@@ -650,9 +650,8 @@ async function openDetail(m) {
 }
 
 async function loadAllowlist() {
-  const g = $("#group").value || scope;
+  const g = $("#group").value || scope || "__global__";
   const box = $("#allowbox");
-  if (!g) { box.hidden = true; return; }
   box.hidden = false;
   try {
     const d = await (await api("/admin/allowlist?group=" + encodeURIComponent(g))).json();
@@ -661,12 +660,13 @@ async function loadAllowlist() {
   } catch (e) {}
 }
 $("#allowsave").onclick = async () => {
-  const g = $("#group").value || scope;
-  if (!g) return alert("Elegí un grupo primero.");
+  const g = $("#group").value || scope || "__global__";
+  if (g === "__global__" && !confirm("Aplicar esta allowlist a TODOS los grupos?")) return;
   const hosts = $("#allowlist").value.split("\n").map(s => s.trim()).filter(Boolean);
   const r = await api("/admin/allowlist", { method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ group_id: g, hosts }) });
-  if (r.ok) { $("#allowmeta").textContent = "aplicada a " + g + " ✓"; refresh(); loadAllowlist(); }
+  if (r.ok) { const d = await r.json();
+    $("#allowmeta").textContent = "aplicada a " + (d.groups || [g]).join(", ") + " ✓"; refresh(); loadAllowlist(); }
   else alert("error: " + (await r.text()));
 };
 
