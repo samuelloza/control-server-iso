@@ -118,10 +118,13 @@ def admin_group_put(h, group_id):
 
 
 def stored_allowlist(conn, group_id):
-    row = conn.execute("SELECT allowlist_json, updated_at FROM group_config WHERE group_id=?",
-                       (group_id,)).fetchone()
-    return (json.loads(row["allowlist_json"]) if row else [],
-            row["updated_at"] if row else None)
+    """Allowlist del grupo; si no tiene propia, la global ('__global__')."""
+    for gid in (group_id, "__global__"):
+        row = conn.execute("SELECT allowlist_json, updated_at FROM group_config WHERE group_id=?",
+                           (gid,)).fetchone()
+        if row and json.loads(row["allowlist_json"]):
+            return json.loads(row["allowlist_json"]), row["updated_at"]
+    return [], None
 
 
 def stored_cfg(conn, group_id, col):
@@ -227,9 +230,7 @@ def admin_allowlist_get(h, query):
         return
     if scope is not None:
         return h.error(403, "allowlist persistente: solo con el token superadmin")
-    group_id = (query.get("group") or [""])[0]
-    if not group_id:
-        return h.error(400, "group required")
+    group_id = (query.get("group") or [""])[0] or "__global__"
     hosts, updated_at = stored_allowlist(db(), group_id)
     return h.json(200, {"group_id": group_id, "hosts": hosts, "updated_at": updated_at})
 
@@ -243,9 +244,9 @@ def admin_allowlist_put(h):
     body = h.read_json()
     if not isinstance(body, dict) or not isinstance(body.get("hosts"), list):
         return h.error(400, "expected {group_id, hosts:[...]}")
-    group_id = str(body.get("group_id", ""))
-    if not group_id:
-        return h.error(400, "group_id required")
+    # "(todos)" = '__global__': se guarda como global y se aplica a cada grupo.
+    group_id = str(body.get("group_id", "")) or "__global__"
+    targets = list(group_records()) if group_id == "__global__" else [group_id]
     hosts, seen = [], set()
     for host in body["hosts"]:
         host = str(host).strip()
@@ -254,25 +255,30 @@ def admin_allowlist_put(h):
             hosts.append(host)
     if len(hosts) > 500:
         return h.error(400, "too many hosts (max 500)")
+    sent = []
     with DB_LOCK:
         conn = db()
-        conn.execute(
-            """INSERT INTO group_config (group_id, allowlist_json, updated_at) VALUES (?,?,?)
-               ON CONFLICT(group_id) DO UPDATE SET
-                 allowlist_json=excluded.allowlist_json, updated_at=excluded.updated_at""",
-            (group_id, json.dumps(hosts), iso(now())))
+        for gid in dict.fromkeys([group_id] + targets):
+            conn.execute(
+                """INSERT INTO group_config (group_id, allowlist_json, updated_at) VALUES (?,?,?)
+                   ON CONFLICT(group_id) DO UPDATE SET
+                     allowlist_json=excluded.allowlist_json, updated_at=excluded.updated_at""",
+                (gid, json.dumps(hosts), iso(now())))
         try:
-            payload_obj = enqueue_command(conn, group_id, "*", "set-allowlist", {"hosts": hosts})
+            for gid in targets:
+                sent.append((gid, enqueue_command(conn, gid, "*", "set-allowlist", {"hosts": hosts})))
         except ValueError as exc:
             return h.error(400, str(exc))
         except RuntimeError as exc:
             return h.error(500, str(exc))
     with CMD_COND:
         CMD_COND.notify_all()
-    publish("command.sent", {"nonce": payload_obj["nonce"], "action": "set-allowlist",
-                             "machine_id": "*"}, group_id)
+    for gid, payload_obj in sent:
+        publish("command.sent", {"nonce": payload_obj["nonce"], "action": "set-allowlist",
+                                 "machine_id": "*"}, gid)
     return h.json(200, {"ok": True, "group_id": group_id, "hosts": hosts,
-                            "nonce": payload_obj["nonce"]})
+                        "groups": [gid for gid, _ in sent],
+                        "nonce": sent[0][1]["nonce"] if sent else None})
 
 
 # homepage y logo por sede, los entrega el login

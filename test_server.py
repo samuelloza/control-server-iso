@@ -416,6 +416,11 @@ def main():
     # cross-venue read is still 403 (superadmin-only trumps the 404-not-a-leak rule)
     s, _ = call("GET", "/admin/allowlist?group=lab-uno", token="coord-dos")
     assert s == 403, s
+    # "(todos)": sin group_id se guarda global y se aplica a cada grupo
+    s, b = call("PUT", "/admin/allowlist", {"hosts": ["juez.example"]}, token="admin-secret")
+    assert s == 200 and set(b["groups"]) >= {"lab-uno", "lab-dos"}, b
+    s, b = call("GET", "/admin/allowlist?group=lab-uno", token="admin-secret")
+    assert s == 200 and b["hosts"] == ["juez.example"], b
 
     # homepage persistente: se entrega en el login, no como comando masivo
     s, b = call("GET", "/admin/homepage?group=lab-uno", token="admin-secret")
